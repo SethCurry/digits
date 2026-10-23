@@ -4,6 +4,8 @@
 #include "Leap.h"
 #include "./include/libdigitspy.hpp"
 #include "libdigits.hpp"
+#include <chrono>
+#include <thread>
 
 using namespace Leap;
 
@@ -17,13 +19,16 @@ extern "C" {
     void start_listener(int interval, int duration) {
         // Create a sample listener and controller
         listener.setInterval(interval);
-        listener.setBufferSize(duration);
+        //listener.setBufferSize(duration);
 
         // Have the sample listener receive events from the controller
         controller.addListener(listener);
     }
 
     void get_frames(float **dest) {
+      while (!listener.full) {
+         std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
         listener.getFrames(dest);
     }
 }
@@ -85,6 +90,9 @@ void LibdigitspyListener::onFrame(const Controller &controller) {
             bufferedFrames.insert(pos, inputs);
 
             while (bufferedFrames.size() > bufferSize) {
+              if (!full) {
+                full = true;
+              }
                 bufferedFrames.pop_back();
             }
           };
@@ -92,8 +100,9 @@ void LibdigitspyListener::onFrame(const Controller &controller) {
         };
     };
 
-void LibdigitspyListener::getFrames(float **into) {
-    for (size_t i = 0; i < listener.size; i++) {
+    void LibdigitspyListener::getFrames(float **into) {
+        std::lock_guard<std::mutex> guard(bufferedFramesMut);
+    for (size_t i = 0; i < bufferSize; i++) {
         for (int j = 0; j < 66; j++) {
             into[i][j] = bufferedFrames.at(i).at(j);
         }

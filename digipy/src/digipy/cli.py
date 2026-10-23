@@ -9,6 +9,7 @@ from collections import deque
 import structlog
 
 from digipy import training
+import time
 
 structlog.configure(
     processors=[
@@ -25,7 +26,6 @@ structlog.configure(
     cache_logger_on_first_use=False,
 )
 log = structlog.get_logger()
-
 
 def _run_animate_hand(args: argparse.Namespace) -> None:
     # Imported lazily so that CLI startup (and other subcommands) do not pay
@@ -68,59 +68,26 @@ def _run_inference(args: argparse.Namespace) -> None:
     # Imported lazily so CLI startup for other subcommands doesn't pay for
     # the tensorflow import.
     import numpy
+    from digipy import libdigits
 
     from digipy.gestures import Gesture
     from digipy.training import GestureModel
 
-    duration = args.duration
+    duration = 50
     n_channels = 66
+
+    libdigits.start_listener(20, duration)
 
     log.info("loading model weights", model_path=args.model)
     model = GestureModel(load_model_path=args.model)
     log.info("model loaded")
 
-    cmd = [args.binary, "--format", "model", "--interval", str(args.interval)]
-    log.info("starting digits binary", cmd=" ".join(cmd))
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-        text=True,
-        bufsize=1,
-    )
-
-    window: deque[list[float]] = deque(maxlen=duration)
-
     try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                values = [float(token) for token in line.split(",")]
-            except ValueError:
-                continue
-
-            if len(values) != n_channels:
-                print("wrong value length")
-                log.warning(
-                    "skipping frame with unexpected channel count",
-                    channels=len(values),
-                    expected=n_channels,
-                )
-                continue
-
-            window.append(values)
-
-            # The model expects a window of `duration` frames, so we only
-            # run a prediction once enough frames have been collected.
-            if len(window) != duration:
-                continue
-
-            sample = numpy.array([list(window)], dtype=float)
-            probabilities = model.model.predict(sample, verbose=0)
+        while True:
+            sample = libdigits.get_frames()
+            # Model input is (None, 50, 66); add the batch dimension.
+            sample = sample[numpy.newaxis, ...]
+            probabilities = model.model.predict(sample, verbose=1)
             predicted_class = int(probabilities.argmax(axis=-1)[0])
             gesture = Gesture(predicted_class)
             log.info(
@@ -128,15 +95,8 @@ def _run_inference(args: argparse.Namespace) -> None:
                 gesture=gesture.name,
                 confidence=float(probabilities[0][predicted_class]),
             )
-            window = []
     except KeyboardInterrupt:
         log.info("interrupted")
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -11,7 +11,7 @@ using namespace Leap;
 class LibdigitspyListener : public Listener {
   long lastEmit = 0;
   long interval = 50;
-  int bufferSize = 20;
+  int bufferSize = 50;
   std::vector<std::vector<float>> bufferedFrames;
   std::mutex bufferedFramesMut;
 
