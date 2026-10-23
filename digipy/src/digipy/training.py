@@ -1,12 +1,25 @@
+"""Gesture-recognition model and training pipeline.
+
+Defines the convolutional gesture model used by ``digipy``, the
+capture -> skeletal-frame conversion, and the dataset loading / training
+helpers wired up by the ``train`` and ``inference`` subcommands of
+:mod:`digipy.cli`.
+
+Feature layout (66 channels per frame, 50 frames per sample):
+  - 5 fingers x 4 knuckles x 3 (xyz) = 60
+  - palm (3) + wrist (3) = 6
+"""
+
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
-import numpy
+import numpy as np
 import tensorflow
-import tensorflow.keras as keras
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
-from tensorflow.keras.backend import expand_dims
 from tensorflow.keras.callbacks import History
 from tensorflow.keras.layers import (
     AveragePooling1D,
@@ -18,20 +31,29 @@ from tensorflow.keras.layers import (
     Lambda,
     concatenate,
 )
-from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import plot_model, to_categorical
 
 from digipy.capture import Frame, load_json_frames
 from digipy.gestures import Gesture, parse_gesture
 
+# Number of frames per sample and channels per frame.  Must match the model
+# input shape and the constants in digipy.libdigits.
+DURATION = 50
+N_CHANNELS = 66
 
-def average(one: float, two: float):
+
+def _average(one: float, two: float) -> float:
     return (one + two) / 2
 
 
-def average_vectors(one: list[float], two: list[float]):
-    return [average(one[0], two[0]), average(one[1], two[1]), average(one[2], two[2])]
+def _average_vectors(one: list[float], two: list[float]) -> list[float]:
+    return [
+        _average(one[0], two[0]),
+        _average(one[1], two[1]),
+        _average(one[2], two[2]),
+    ]
 
 
 class Position(BaseModel):
@@ -40,14 +62,14 @@ class Position(BaseModel):
     z: float
 
     @staticmethod
-    def from_vector(items: list[float]):
+    def from_vector(items: list[float]) -> Position:
         return Position(x=items[0], y=items[1], z=items[2])
 
     @staticmethod
-    def avg_vectors(one: list[float], two: list[float]):
-        return Position.from_vector(average_vectors(one, two))
+    def avg_vectors(one: list[float], two: list[float]) -> Position:
+        return Position.from_vector(_average_vectors(one, two))
 
-    def to_list(self):
+    def to_list(self) -> list[float]:
         return [self.x, self.y, self.z]
 
 
@@ -59,6 +81,8 @@ class SkeletalFinger(BaseModel):
 
 
 class SkeletalHGRFrame(BaseModel):
+    """A single hand reduced to knuckle/tip/palm/wrist positions."""
+
     thumb: SkeletalFinger
     index: SkeletalFinger
     middle: SkeletalFinger
@@ -68,18 +92,17 @@ class SkeletalHGRFrame(BaseModel):
     wrist: Position
 
     @staticmethod
-    def from_capture(frame: Frame) -> list["SkeletalHGRFrame"]:
-        skelFrames = []
+    def from_capture(frame: Frame) -> list[SkeletalHGRFrame]:
+        """Convert a capture :class:`Frame` to one skeletal frame per hand."""
+        skel_frames: list[SkeletalHGRFrame] = []
 
         for hand in frame.hands:
             wrist_position = Position.from_vector(hand.arm.wrist_position)
             palm_position = Position.from_vector(hand.palm_position)
 
-            fingers = {}
+            fingers: dict[str, SkeletalFinger] = {}
             for finger in hand.fingers:
-                bones = {}
-                for bone in finger.bones:
-                    bones[bone.name] = bone
+                bones = {bone.name: bone for bone in finger.bones}
 
                 tip = Position.from_vector(bones["Distal"].end)
                 third_knuckle = Position.avg_vectors(
@@ -101,30 +124,34 @@ class SkeletalHGRFrame(BaseModel):
                     tip=tip,
                 )
 
-            skelFrame = SkeletalHGRFrame(
-                thumb=fingers["Thumb"],
-                index=fingers["Index"],
-                middle=fingers["Middle"],
-                ring=fingers["Ring"],
-                pinky=fingers["Pinky"],
-                palm=palm_position,
-                wrist=wrist_position,
+            skel_frames.append(
+                SkeletalHGRFrame(
+                    thumb=fingers["Thumb"],
+                    index=fingers["Index"],
+                    middle=fingers["Middle"],
+                    ring=fingers["Ring"],
+                    pinky=fingers["Pinky"],
+                    palm=palm_position,
+                    wrist=wrist_position,
+                )
             )
 
-            skelFrames.append(skelFrame)
+        return skel_frames
 
-        return skelFrames
-
-    def to_frame(self):
+    def to_frame(self) -> np.ndarray:
+        """Flatten this skeletal frame into a 1-D feature vector of 66 floats."""
         dim: list[float] = []
-
-        for i in [self.thumb, self.index, self.middle, self.ring, self.pinky]:
-            for j in [i.first_knuckle, i.second_knuckle, i.third_knuckle, i.tip]:
-                dim.extend(j.to_list())
-
+        for finger in (self.thumb, self.index, self.middle, self.ring, self.pinky):
+            for point in (
+                finger.first_knuckle,
+                finger.second_knuckle,
+                finger.third_knuckle,
+                finger.tip,
+            ):
+                dim.extend(point.to_list())
         dim.extend(self.palm.to_list())
         dim.extend(self.wrist.to_list())
-        return numpy.array(dim, dtype=float)
+        return np.array(dim, dtype=float)
 
 
 @dataclass
@@ -133,55 +160,56 @@ class LoadedSample:
     samples: list[SkeletalHGRFrame]
 
 
-def load_data_dir(path: str, duration: int = 50):
-    answer_path = path + "/answer.txt"
+@dataclass
+class TrainingDatasets:
+    """Train/validation feature and label arrays for model training.
 
-    all_samples = []
+    ``*_features`` have shape ``(n_samples, DURATION, N_CHANNELS)`` and
+    ``*_labels`` are one-hot encoded with ``n_classes`` columns.
+    """
 
-    sample_files = [x for x in os.listdir(path) if x.endswith(".json")]
+    train_features: np.ndarray
+    train_labels: np.ndarray
+    val_features: np.ndarray
+    val_labels: np.ndarray
 
-    with open(answer_path, "r") as fd:
-        answer_text = fd.read().strip()
 
-    answer = parse_gesture(answer_text)
+def load_data_dir(path: str | Path, duration: int = DURATION) -> list[LoadedSample]:
+    """Load all labeled samples from a single sample directory.
 
-    for sample_file in sample_files:
-        sample_path = path + "/" + sample_file
-        raw_samples = load_json_frames(sample_path)
+    A sample directory contains an ``answer.txt`` with the gesture label and
+    one or more ``*.json`` JSONL files, each a sequence of frames making up
+    one window.  Windows whose frame count != *duration* are skipped.
+    """
+    path = Path(path)
+    answer = parse_gesture((path / "answer.txt").read_text(encoding="utf-8").strip())
 
-        samples = []
-        [samples.extend(SkeletalHGRFrame.from_capture(x)) for x in raw_samples]
+    all_samples: list[LoadedSample] = []
+    for sample_file in sorted(f for f in os.listdir(path) if f.endswith(".json")):
+        raw_frames = load_json_frames(path / sample_file)
+
+        samples: list[SkeletalHGRFrame] = []
+        for frame in raw_frames:
+            samples.extend(SkeletalHGRFrame.from_capture(frame))
 
         if len(samples) != duration:
             continue
 
-        loaded = LoadedSample(answer=answer, samples=samples)
-        all_samples.append(loaded)
+        all_samples.append(LoadedSample(answer=answer, samples=samples))
 
     return all_samples
 
 
-force_use_cpu = False
-
-if force_use_cpu:
-    import os
-
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-    from tensorflow.keras import backend as K
-
-    print(
-        "There should not be a GPU in the following list:",
-        K.tensorflow_backend._get_available_gpus(),
-    )
-
-
-def create_model(n_classes=3, duration=50, n_channels=66, dropout_probability=0.2):
-    # Define model, using functional API
+def create_model(
+    n_classes: int = 3,
+    duration: int = DURATION,
+    n_channels: int = N_CHANNELS,
+    dropout_probability: float = 0.2,
+) -> Model:
+    """Build the multi-branch per-channel convolutional gesture model."""
     model_input = Input(shape=(duration, n_channels))
 
-    # slice into channels
+    # Slice into per-channel inputs so each channel gets its own conv branch.
     channel_inputs = Lambda(
         lambda x: tensorflow.split(x, num_or_size_splits=n_channels, axis=-1)
     )(model_input)
@@ -189,102 +217,93 @@ def create_model(n_classes=3, duration=50, n_channels=66, dropout_probability=0.
     features = []
     for channel in range(n_channels):
         channel_input = channel_inputs[channel]
-        # high branch
-        high = Conv1D(
-            filters=8,
-            kernel_size=7,
-            padding="same",
-            activation="relu",
-            input_shape=(100, 1),
-        )(channel_input)
+
+        # High-kernel branch.
+        high = Conv1D(filters=8, kernel_size=7, padding="same", activation="relu")(
+            channel_input
+        )
         high = AveragePooling1D(pool_size=2)(high)
         high = Conv1D(filters=4, kernel_size=7, padding="same", activation="relu")(high)
         high = AveragePooling1D(pool_size=2)(high)
         high = Conv1D(filters=4, kernel_size=7, padding="same", activation="relu")(high)
         high = Dropout(dropout_probability)(high)
         high = AveragePooling1D(pool_size=2)(high)
-        # low branch
-        low = Conv1D(
-            filters=8,
-            kernel_size=3,
-            padding="same",
-            activation="relu",
-            input_shape=(100, 1),
-        )(channel_input)
+
+        # Low-kernel branch.
+        low = Conv1D(filters=8, kernel_size=3, padding="same", activation="relu")(
+            channel_input
+        )
         low = AveragePooling1D(pool_size=2)(low)
         low = Conv1D(filters=4, kernel_size=3, padding="same", activation="relu")(low)
         low = AveragePooling1D(pool_size=2)(low)
         low = Conv1D(filters=4, kernel_size=3, padding="same", activation="relu")(low)
         low = Dropout(dropout_probability)(low)
         low = AveragePooling1D(pool_size=2)(low)
-        # pooling branch
-        ap_residual = AveragePooling1D(pool_size=2, input_shape=(100, 1))(channel_input)
+
+        # Pooling residual branch.
+        ap_residual = AveragePooling1D(pool_size=2)(channel_input)
         ap_residual = AveragePooling1D(pool_size=2)(ap_residual)
         ap_residual = AveragePooling1D(pool_size=2)(ap_residual)
-        # channel output
-        channel_output = concatenate([high, low, ap_residual])
-        features.append(channel_output)
+
+        features.append(concatenate([high, low, ap_residual]))
 
     features = concatenate(features)
     features = Flatten()(features)
     features = Dense(units=1936, activation="relu")(features)
-
     model_output = Dense(units=n_classes, activation="softmax")(features)
 
-    model = Model(inputs=[model_input], outputs=[model_output])
-    return model
-
-
-# We load a gesture dataset:
-#
-#   x.shape should be (dataset_size, duration, channel)
-#   y.shape should be (dataset_size, 1)
-
-
-@dataclass
-class TrainingDatasets:
-    x_train: numpy.array
-    x_test: numpy.array
-    y_train: numpy.array
-    y_test: numpy.array
+    return Model(inputs=[model_input], outputs=[model_output])
 
 
 def load_sample_data(
-    samples_dir: str = "../training/data", training_per_validate: int = 4, n_classes: int = 3
-):
-    sample_dirs = os.listdir(samples_dir)
-    samples = []
-    [samples.extend(load_data_dir(samples_dir + "/" + x)) for x in sample_dirs]
+    samples_dir: str | Path = "../training/data",
+    training_per_validate: int = 4,
+    n_classes: int = 3,
+) -> TrainingDatasets:
+    """Load all sample directories under *samples_dir* and split into
+    train / validation datasets.
 
-    x_samples: list[LoadedSample] = []
-    y_samples: list[LoadedSample] = []
+    Every ``training_per_validate``-th sample (by load order) is held out for
+    validation; the rest are used for training.
+    """
+    samples: list[LoadedSample] = []
+    for entry in sorted(os.listdir(samples_dir)):
+        samples.extend(load_data_dir(Path(samples_dir) / entry))
 
-    for i, t in enumerate(samples):
-        if len(t.samples) != 50:
+    train_split: list[LoadedSample] = []
+    val_split: list[LoadedSample] = []
+    for i, sample in enumerate(samples):
+        if len(sample.samples) != DURATION:
             continue
         if i % training_per_validate == 0:
-            y_samples.append(t)
+            val_split.append(sample)
         else:
-            x_samples.append(t)
+            train_split.append(sample)
 
-
-    x_train = numpy.array([list(map(lambda i: i.to_frame(), x.samples)) for x in x_samples])
-    x_test = numpy.array([x.answer.value for x in x_samples])
-    y_train = numpy.array([list(map(lambda i: i.to_frame(), x.samples)) for x in y_samples])
-    y_test = numpy.array([x.answer.value for x in y_samples])
-
-    # Transform the labels to one-hot encoding for the cross-entropy loss
-    y_test = to_categorical(y_test, num_classes=n_classes)
-    x_test = to_categorical(x_test, num_classes=n_classes)
+    train_features = np.array(
+        [np.stack(s.to_frame() for s in x.samples) for x in train_split]
+    )
+    val_features = np.array(
+        [np.stack(s.to_frame() for s in x.samples) for x in val_split]
+    )
+    train_labels = to_categorical(
+        np.array([x.answer.value for x in train_split]), num_classes=n_classes
+    )
+    val_labels = to_categorical(
+        np.array([x.answer.value for x in val_split]), num_classes=n_classes
+    )
 
     return TrainingDatasets(
-        x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test
+        train_features=train_features,
+        train_labels=train_labels,
+        val_features=val_features,
+        val_labels=val_labels,
     )
 
 
-def plot_history(history: History):
-    # plot everything
-    # summarize history for accuracy
+def plot_history(history: History) -> None:
+    """Plot training & validation accuracy and loss curves."""
+    # Accuracy
     plt.plot(history.history["accuracy"])
     plt.plot(history.history["val_accuracy"])
     plt.title("model accuracy")
@@ -292,7 +311,8 @@ def plot_history(history: History):
     plt.xlabel("epoch")
     plt.legend(["train", "test"], loc="upper left")
     plt.show()
-    # summarize history for loss
+
+    # Loss
     plt.plot(history.history["loss"])
     plt.plot(history.history["val_loss"])
     plt.title("model loss")
@@ -303,49 +323,47 @@ def plot_history(history: History):
 
 
 class GestureModel:
-    def __init__(self, load_model_path: str | None = None):
+    """Wrapper around the Keras gesture model with train/save/predict helpers."""
+
+    def __init__(self, load_model_path: str | Path | None = None):
         self.model = create_model()
         if load_model_path:
             self.model.load_weights(load_model_path)
 
-    def train(self, datasets: TrainingDatasets):
-        # Training: Optimizer's Learning Rate
-        learning_rate = 0.001
+    def train(self, datasets: TrainingDatasets) -> History:
+        optimizer = Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8)
+        self.model.compile(
+            optimizer=optimizer,
+            loss="categorical_crossentropy",
+            metrics=["accuracy"],
+        )
 
-        # We use Adam to optimize a multi-class classification task
-        optimizer = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-8)
-        loss = "categorical_crossentropy"
-        metrics = ["accuracy"]
-        self.model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-
-        # Start the training
-
-        # ...with an existing validation set:
-        history = self.model.fit(
-            datasets.x_train,
-            datasets.x_test,
-            validation_data=(datasets.y_train, datasets.y_test),
+        return self.model.fit(
+            datasets.train_features,
+            datasets.train_labels,
+            validation_data=(datasets.val_features, datasets.val_labels),
             epochs=100,
             batch_size=32,
         )
 
-        return history
-
-    def plot(self):
+    def plot(self) -> None:
         plot_model(self.model, to_file="model.png", show_shapes=True)
 
-    def save_weights(self, save_to: str):
+    def save_weights(self, save_to: str | Path) -> None:
         self.model.save_weights(save_to)
 
-    def categorize(self, frame: SkeletalHGRFrame):
+    def categorize(self, frames: list[SkeletalHGRFrame]) -> list[int]:
+        """Predict the gesture-class index for a single window of frames."""
+        sample = np.stack([f.to_frame() for f in frames])[np.newaxis, ...]
+        probabilities = self.model.predict(sample)
+        return probabilities.argmax(axis=-1).tolist()
 
-        predicted_prob = self.model.predict(frame.to_frame())
-        predicted_class = predicted_prob.argmax(axis=-1).tolist()
-
-        return predicted_class
-
-    def evaluate_accuracy(self, datasets: TrainingDatasets):
-        _, train_accuracy = self.model.evaluate(datasets.x_train, datasets.y_train)
-        _, test_accuracy = self.model.evaluate(datasets.x_test, datasets.y_test)
-
-        return (train_accuracy, test_accuracy)
+    def evaluate_accuracy(self, datasets: TrainingDatasets) -> tuple[float, float]:
+        """Return ``(train_accuracy, val_accuracy)``."""
+        _, train_accuracy = self.model.evaluate(
+            datasets.train_features, datasets.train_labels
+        )
+        _, val_accuracy = self.model.evaluate(
+            datasets.val_features, datasets.val_labels
+        )
+        return train_accuracy, val_accuracy

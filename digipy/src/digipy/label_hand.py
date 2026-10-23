@@ -25,7 +25,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider, TextBox
 
@@ -64,9 +63,7 @@ def _draw_frame(ax, segs, palms):
     return artists
 
 
-def _export_sample(
-    frames, start, count, label, sample_name, out_root
-):
+def _export_sample(frames, start, count, label, sample_name, out_root):
     """
     Write frames[start : start+count] to ``out_root/<sample_name>`` as a labeled
     training sample (answer.txt + sample.json). Returns the path written.
@@ -98,11 +95,13 @@ def _export_sample(
         raise ValueError(f"sample directory already exists: {out_dir}")
     out_dir.mkdir(parents=True)
 
-    (out_dir / "answer.txt").write_text(label + "\n")
+    (out_dir / "answer.txt").write_text(label + "\n", encoding="utf-8")
 
-    with open(out_dir / "sample.json", "w") as f:
-        for frame in frames[start : start + count]:
-            f.write(json.dumps(frame) + "\n")
+    window = frames[start : start + count]
+    (out_dir / "sample.json").write_text(
+        "".join(json.dumps(frame) + "\n" for frame in window),
+        encoding="utf-8",
+    )
 
     return out_dir
 
@@ -143,7 +142,8 @@ def run(args: argparse.Namespace) -> None:
     ax.set_zlabel("Z (mm)")
     try:
         ax.set_box_aspect((1, 1, 1))
-    except Exception:
+    except AttributeError:
+        # Older matplotlib versions don't support set_box_aspect.
         pass
 
     status_ax = fig.add_axes([0.05, 0.255, 0.90, 0.03])
@@ -162,7 +162,8 @@ def run(args: argparse.Namespace) -> None:
         for art in skeleton_artists:
             try:
                 art.remove()
-            except Exception:
+            except (ValueError, NotImplementedError):
+                # Artist may already be detached from the axes.
                 pass
         skeleton_artists.clear()
         segs, palms = segments_for_frame(frames[i])
@@ -180,7 +181,7 @@ def run(args: argparse.Namespace) -> None:
         return (
             f"frame {i + 1}/{n}   "
             f"remaining={remaining}   "
-            f"label=\"{label_box.text}\"   count={count_box.text}   "
+            f'label="{label_box.text}"   count={count_box.text}   '
             f"out={out_root}"
         )
 

@@ -1,3 +1,5 @@
+"""Gesture labels used by the hand-tracking gesture model."""
+
 from enum import Enum
 
 
@@ -7,17 +9,22 @@ class Gesture(Enum):
     PEACE_SIGN = 2
 
 
-def parse_gesture(name: str):
+# Lowercase name -> Gesture, for parsing human-friendly labels.
+_GESTURE_BY_NAME = {g.name.lower(): g for g in Gesture}
+
+
+def parse_gesture(name: str) -> Gesture:
+    """Parse a gesture label from either an integer string or a name.
+
+    Accepts an integer (e.g. ``"1"``) or a lowercase gesture name
+    (e.g. ``"finger_gun"``).  Raises ``ValueError`` for unknown values.
+    """
     try:
-        name_int = int(name)
-        return Gesture(name_int)
-    except:
-        if name == "none":
-            return Gesture.NONE
+        return Gesture(int(name))
+    except ValueError:
+        pass
 
-        if name == "finger_gun":
-            return Gesture.FINGER_GUN
-        if name == "peace_sign":
-            return Gesture.PEACE_SIGN
-
-        raise ValueError("unknown gesture: " + name)
+    try:
+        return _GESTURE_BY_NAME[name.lower()]
+    except KeyError:
+        raise ValueError(f"unknown gesture: {name!r}") from None

@@ -16,10 +16,11 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")  # non-interactive backend for saving to file
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3d projection)
 
@@ -49,8 +50,6 @@ def animate(args: argparse.Namespace) -> None:
     print(f"loaded {len(frames)} frames")
 
     mins, maxs = compute_scene_bounds(frames)
-    center = (mins + maxs) / 2.0
-    extent = (maxs - mins).max() / 2.0
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection="3d")
@@ -81,7 +80,8 @@ def animate(args: argparse.Namespace) -> None:
         # Equal-ish aspect for 3D (matplotlib scales per-axis manually)
         try:
             ax.set_box_aspect((1, 1, 1))
-        except Exception:
+        except AttributeError:
+            # Older matplotlib versions don't support set_box_aspect.
             pass
 
     def update(i):
@@ -95,9 +95,16 @@ def animate(args: argparse.Namespace) -> None:
 
         # Draw each bone segment
         for s, e in segs:
-            ln, = ax.plot([s[0], e[0]], [s[1], e[1]], [s[2], e[2]],
-                          color="steelblue", linewidth=2.0, marker="o",
-                          markersize=3, markerfacecolor="steelblue")
+            (ln,) = ax.plot(
+                [s[0], e[0]],
+                [s[1], e[1]],
+                [s[2], e[2]],
+                color="steelblue",
+                linewidth=2.0,
+                marker="o",
+                markersize=3,
+                markerfacecolor="steelblue",
+            )
             skeleton_lines.append(ln)
 
         # Palm markers
@@ -112,12 +119,18 @@ def animate(args: argparse.Namespace) -> None:
         azim = (360.0 * i / max(1, len(frames))) % 360.0
         ax.view_init(elev=elev, azim=azim)
 
-        ax.set_title(f"Hand tracking 3D animation  (frame {i+1}/{len(frames)})")
+        ax.set_title(f"Hand tracking 3D animation  (frame {i + 1}/{len(frames)})")
         return skeleton_lines + [palm_scatter]
 
-    anim = FuncAnimation(fig, update, frames=len(per_frame),
-                         init_func=init, interval=args.interval,
-                         blit=False, repeat=True)
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(per_frame),
+        init_func=init,
+        interval=args.interval,
+        blit=False,
+        repeat=True,
+    )
 
     out_path = Path(args.output)
     print(f"writing animation to {out_path} ...")
@@ -126,13 +139,11 @@ def animate(args: argparse.Namespace) -> None:
     else:
         # mp4 - try ffmpeg, fall back to a clearer error
         try:
-            anim.save(str(out_path), writer="ffmpeg",
-                      fps=args.fps, dpi=args.dpi)
+            anim.save(str(out_path), writer="ffmpeg", fps=args.fps, dpi=args.dpi)
         except (ValueError, RuntimeError) as e:
             print(f"ffmpeg save failed ({e}); falling back to .gif")
             gif_out = out_path.with_suffix(".gif")
-            anim.save(str(gif_out), writer="pillow",
-                      fps=args.fps, dpi=args.dpi)
+            anim.save(str(gif_out), writer="pillow", fps=args.fps, dpi=args.dpi)
             print(f"wrote {gif_out} instead")
 
     plt.close(fig)

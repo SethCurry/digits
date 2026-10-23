@@ -1,15 +1,20 @@
-#!/usr/bin/env python3
+"""Command-line entry point for the ``digipy`` toolkit.
+
+Subcommands:
+  train         Train a gesture model from labeled samples.
+  animate-hand  Render a 3D animation from a capture.json file.
+  label-hand    Interactive 3D viewer / training-sample exporter.
+  inference     Run live gesture inference from the digits binary.
+"""
+
+from __future__ import annotations
 
 import argparse
 import logging
-import subprocess
-import sys
-from collections import deque
 
 import structlog
 
 from digipy import training
-import time
 
 structlog.configure(
     processors=[
@@ -27,6 +32,7 @@ structlog.configure(
 )
 log = structlog.get_logger()
 
+
 def _run_animate_hand(args: argparse.Namespace) -> None:
     # Imported lazily so that CLI startup (and other subcommands) do not pay
     # for the matplotlib/numpy imports of digipy.animate_hand.
@@ -43,40 +49,25 @@ def _run_label_hand(args: argparse.Namespace) -> None:
     run(args)
 
 
-def _train_model(args: argparse.Namespace):
+def _train_model(args: argparse.Namespace) -> None:
     model = training.GestureModel()
-    #model.plot()
 
     samples = training.load_sample_data(args.training_data)
-
     history = model.train(samples)
-
     training.plot_history(history)
-
-    model.save_weights("./model.weights.h5")
-
-    #results = model.evaluate_accuracy(samples)
-
-    #train_accuracy = results[0]
-    #test_accuracy = results[1]
-
-    #print("Accuracy on training data was " + str(train_accuracy) + "%")
-    #print("Accuracy on test data was " + str(test_accuracy) + "%")
+    model.save_weights(args.output)
 
 
 def _run_inference(args: argparse.Namespace) -> None:
-    # Imported lazily so CLI startup for other subcommands doesn't pay for
-    # the tensorflow import.
-    import numpy
-    from digipy import libdigits
+    # Imported lazily so CLI startup for other subcommands doesn't pay for the
+    # tensorflow import.
+    import numpy as np
 
+    from digipy import libdigits
     from digipy.gestures import Gesture
     from digipy.training import GestureModel
 
-    duration = 50
-    n_channels = 66
-
-    libdigits.start_listener(20, duration)
+    libdigits.start_listener(args.interval, args.duration)
 
     log.info("loading model weights", model_path=args.model)
     model = GestureModel(load_model_path=args.model)
@@ -85,8 +76,8 @@ def _run_inference(args: argparse.Namespace) -> None:
     try:
         while True:
             sample = libdigits.get_frames()
-            # Model input is (None, 50, 66); add the batch dimension.
-            sample = sample[numpy.newaxis, ...]
+            # Model input is (None, duration, n_channels); add the batch dim.
+            sample = sample[np.newaxis, ...]
             probabilities = model.model.predict(sample, verbose=1)
             predicted_class = int(probabilities.argmax(axis=-1)[0])
             gesture = Gesture(predicted_class)
@@ -119,8 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument(
         "-o",
         "--output",
-        default="./digipy.model",
-        help="The location to output the trained model to.",
+        default="./model.weights.h5",
+        help="The location to output the trained model weights to.",
     )
     train.set_defaults(func=_train_model)
 

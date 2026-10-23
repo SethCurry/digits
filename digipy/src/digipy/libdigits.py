@@ -1,43 +1,65 @@
+"""Thin ctypes wrapper around the ``libdigitspy`` shared library.
+
+The C library streams hand-tracking frames into a fixed-size sliding window
+of ``N_FRAMES`` rows by ``N_INPUTS`` channels.  :func:`get_frames` returns
+that window as a ``(N_FRAMES, N_INPUTS)`` :class:`numpy.ndarray` view into a
+reusable contiguous buffer (no per-call allocation).
+"""
+
+from __future__ import annotations
+
 import ctypes
+import os
+from pathlib import Path
 
-import numpy
+import numpy as np
 
-libdigits = ctypes.CDLL("../src/build/lib/libdigitspy/liblibdigitspy.so")
-
+# Number of frames in the sliding window and channels per frame.  These must
+# match the model's input shape (see digipy.training.create_model).
 N_FRAMES = 50
 N_INPUTS = 66
 
-# A single contiguous buffer holding all frames back-to-back.
-# This lets us hand back a single numpy ndarray at the end.
+# Path to the shared library.  Override with the DIGIPY_LIBDIGITS env var.
+_DEFAULT_LIB_PATH = "../src/build/lib/libdigitspy/liblibdigitspy.so"
+_LIB_PATH = Path(os.environ.get("DIGIPY_LIBDIGITS", _DEFAULT_LIB_PATH))
+
+libdigits = ctypes.CDLL(str(_LIB_PATH))
+
+# A single contiguous buffer holding all frames back-to-back.  This lets us
+# hand back a single numpy ndarray at the end.
 RAW_FRAMES = (ctypes.c_float * (N_FRAMES * N_INPUTS))()
 
-# The C side expects `float **dest`: an array of pointers, one per row,
-# each pointing at a buffer of N_INPUTS floats.  Build that array of row
-# pointers into the contiguous buffer above.
+# The C side expects ``float **dest``: an array of pointers, one per row, each
+# pointing at a buffer of N_INPUTS floats.  Build that array of row pointers
+# into the contiguous buffer above.
 ROW_PTRS = (ctypes.POINTER(ctypes.c_float) * N_FRAMES)()
 _row_stride = N_INPUTS * ctypes.sizeof(ctypes.c_float)
-for i in range(N_FRAMES):
-    ROW_PTRS[i] = ctypes.cast(
-        ctypes.addressof(RAW_FRAMES) + i * _row_stride,
+for _i in range(N_FRAMES):
+    ROW_PTRS[_i] = ctypes.cast(
+        ctypes.addressof(RAW_FRAMES) + _i * _row_stride,
         ctypes.POINTER(ctypes.c_float),
     )
 
-FLOAT_PTR_PTR = ctypes.POINTER(ctypes.POINTER(ctypes.c_float))
+_FLOAT_PTR_PTR = ctypes.POINTER(ctypes.POINTER(ctypes.c_float))
 
-libdigits.get_frames.argtypes = [FLOAT_PTR_PTR]
+libdigits.get_frames.argtypes = [_FLOAT_PTR_PTR]
 libdigits.start_listener.argtypes = [ctypes.c_int, ctypes.c_int]
 
 
-def start_listener(interval_ms: int, duration: int):
+def start_listener(interval_ms: int, duration: int) -> None:
+    """Start streaming frames from the digits binary."""
     libdigits.start_listener(interval_ms, duration)
 
 
-def get_frames():
+def get_frames() -> np.ndarray:
+    """Return the current sliding window as a ``(N_FRAMES, N_INPUTS)`` array.
+
+    The returned array is a view into the shared ``RAW_FRAMES`` buffer, so it
+    is overwritten on the next call to :func:`get_frames`.  Copy it if you need
+    to keep it.
+    """
     libdigits.get_frames(ROW_PTRS)
     # NOTE: numpy.ctypeslib.as_array ignores the `shape` argument when handed a
-    # flat ctypes array, so it would return a 1-D (N_FRAMES * N_INPUTS,) array.
-    # Build the (N_FRAMES, N_INPUTS) view explicitly from the raw buffer.
-    frames = numpy.frombuffer(RAW_FRAMES, dtype=numpy.float32).reshape(
-        (N_FRAMES, N_INPUTS)
-    )
-    return frames
+    # flat ctypes array, returning a 1-D (N_FRAMES * N_INPUTS,) array.  Build
+    # the (N_FRAMES, N_INPUTS) view explicitly from the raw buffer.
+    return np.frombuffer(RAW_FRAMES, dtype=np.float32).reshape((N_FRAMES, N_INPUTS))
