@@ -2,8 +2,12 @@
 
 import argparse
 import logging
+import subprocess
+import sys
+from collections import deque
 
 import structlog
+
 from digipy import training
 
 structlog.configure(
@@ -25,7 +29,7 @@ log = structlog.get_logger()
 
 def _run_animate_hand(args: argparse.Namespace) -> None:
     # Imported lazily so that CLI startup (and other subcommands) do not pay
-    # for the matplotlib/numpy imports of pywoop.animate_hand.
+    # for the matplotlib/numpy imports of digipy.animate_hand.
     from digipy.animate_hand import animate
 
     animate(args)
@@ -41,7 +45,7 @@ def _run_label_hand(args: argparse.Namespace) -> None:
 
 def _train_model(args: argparse.Namespace):
     model = training.GestureModel()
-    model.plot()
+    #model.plot()
 
     samples = training.load_sample_data(args.training_data)
 
@@ -49,19 +53,96 @@ def _train_model(args: argparse.Namespace):
 
     training.plot_history(history)
 
-    results = model.evaluate_accuracy(samples)
+    model.save_weights("./model.weights.h5")
 
-    train_accuracy = results[0]
-    test_accuracy = results[1]
+    #results = model.evaluate_accuracy(samples)
 
-    print("Accuracy on training data was " + str(train_accuracy) + "%")
-    print("Accuracy on test data was " + str(test_accuracy) + "%")
+    #train_accuracy = results[0]
+    #test_accuracy = results[1]
+
+    #print("Accuracy on training data was " + str(train_accuracy) + "%")
+    #print("Accuracy on test data was " + str(test_accuracy) + "%")
+
+
+def _run_inference(args: argparse.Namespace) -> None:
+    # Imported lazily so CLI startup for other subcommands doesn't pay for
+    # the tensorflow import.
+    import numpy
+
+    from digipy.gestures import Gesture
+    from digipy.training import GestureModel
+
+    duration = args.duration
+    n_channels = 66
+
+    log.info("loading model weights", model_path=args.model)
+    model = GestureModel(load_model_path=args.model)
+    log.info("model loaded")
+
+    cmd = [args.binary, "--format", "model", "--interval", str(args.interval)]
+    log.info("starting digits binary", cmd=" ".join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=sys.stderr,
+        text=True,
+        bufsize=1,
+    )
+
+    window: deque[list[float]] = deque(maxlen=duration)
+
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                values = [float(token) for token in line.split(",")]
+            except ValueError:
+                continue
+
+            if len(values) != n_channels:
+                print("wrong value length")
+                log.warning(
+                    "skipping frame with unexpected channel count",
+                    channels=len(values),
+                    expected=n_channels,
+                )
+                continue
+
+            window.append(values)
+
+            # The model expects a window of `duration` frames, so we only
+            # run a prediction once enough frames have been collected.
+            if len(window) != duration:
+                continue
+
+            sample = numpy.array([list(window)], dtype=float)
+            probabilities = model.model.predict(sample, verbose=0)
+            predicted_class = int(probabilities.argmax(axis=-1)[0])
+            gesture = Gesture(predicted_class)
+            log.info(
+                "gesture detected",
+                gesture=gesture.name,
+                confidence=float(probabilities[0][predicted_class]),
+            )
+            window = []
+    except KeyboardInterrupt:
+        log.info("interrupted")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the pywoop CLI parser with all subcommands."""
+    """Build the digipy CLI parser with all subcommands."""
     parser = argparse.ArgumentParser(
-        prog="pywoop",
+        prog="digipy",
         description="Tools for Leap-Motion-style hand tracking data.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
@@ -78,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument(
         "-o",
         "--output",
-        default="./digits.model",
+        default="./digipy.model",
         help="The location to output the trained model to.",
     )
     train.set_defaults(func=_train_model)
@@ -140,6 +221,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="ms between frames when playing (default 33 ~= 30 fps)",
     )
     label.set_defaults(func=_run_label_hand)
+
+    inference = subparsers.add_parser(
+        "inference",
+        help="run live gesture inference",
+        description=(
+            "Load the trained gesture model and start the digits binary "
+            "to stream live hand-tracking frames. A sliding window of "
+            "frames is fed through the model and the detected gesture is "
+            "printed for each window."
+        ),
+    )
+    inference.add_argument(
+        "-m",
+        "--model",
+        default="./model.weights.h5",
+        help="Path to the trained model weights (.weights.h5).",
+    )
+    inference.add_argument(
+        "-b",
+        "--binary",
+        default="../src/build/digits",
+        help="Path to the digits binary to launch for frame capture.",
+    )
+    inference.add_argument(
+        "--interval",
+        type=int,
+        default=50,
+        help="Frame emit interval (ms) passed to the digits binary.",
+    )
+    inference.add_argument(
+        "--duration",
+        type=int,
+        default=50,
+        help="Number of frames per inference window (model input length).",
+    )
+    inference.set_defaults(func=_run_inference)
 
     return parser
 

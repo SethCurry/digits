@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from digipy!")
+from digipy.cli import main
+
+__all__ = ["main"]

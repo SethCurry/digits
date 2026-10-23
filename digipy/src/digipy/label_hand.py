@@ -13,10 +13,10 @@ containing::
     <output_root>/<sample_name>/answer.txt   # gesture label, e.g. "conductor_up"
     <output_root>/<sample_name>/sample.json  # JSONL, one frame per line
 
-which matches the layout consumed by ``pywoop.training.load_sample_data``.
+which matches the layout consumed by ``digipy.training.load_sample_data``.
 
-Exposed as the ``label-hand`` subcommand of the ``pywoop`` CLI; see
-``pywoop.cli``.
+Exposed as the ``label-hand`` subcommand of the ``digipy`` CLI; see
+``digipy.cli``.
 """
 
 import argparse
@@ -25,15 +25,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Button, Slider, TextBox
+
 from digipy.gestures import Gesture, parse_gesture
 from digipy.hand_geometry import (
     compute_scene_bounds,
     load_frames,
     segments_for_frame,
 )
-from matplotlib.widgets import Button, Slider, TextBox
 
 # Known gesture labels, used as defaults/suggestions in the UI.
 GESTURE_LABELS = [g.name.lower() for g in Gesture]
@@ -63,7 +64,9 @@ def _draw_frame(ax, segs, palms):
     return artists
 
 
-def _export_sample(frames, start, count, label, sample_name, out_root):
+def _export_sample(
+    frames, start, count, label, sample_name, out_root
+):
     """
     Write frames[start : start+count] to ``out_root/<sample_name>`` as a labeled
     training sample (answer.txt + sample.json). Returns the path written.
@@ -108,7 +111,7 @@ def run(args: argparse.Namespace) -> None:
     """
     Open the interactive viewer described by *args* (``input``,
     ``output``, ``play_interval``), as parsed by the ``label-hand``
-    subcommand in ``pywoop.cli``.
+    subcommand in ``digipy.cli``.
     """
     in_path = Path(args.input)
     if not in_path.exists():
@@ -128,7 +131,7 @@ def run(args: argparse.Namespace) -> None:
 
     # --- Layout: 3D scene on top, control strip below ---------------------
     fig = plt.figure(figsize=(9, 9))
-    fig.canvas.manager.set_window_title("pywoop label-hand")
+    fig.canvas.manager.set_window_title("digipy label-hand")
 
     # 3D axes for the hand skeleton
     ax = fig.add_axes([0.05, 0.30, 0.90, 0.65], projection="3d")
@@ -177,7 +180,7 @@ def run(args: argparse.Namespace) -> None:
         return (
             f"frame {i + 1}/{n}   "
             f"remaining={remaining}   "
-            f'label="{label_box.text}"   count={count_box.text}   '
+            f"label=\"{label_box.text}\"   count={count_box.text}   "
             f"out={out_root}"
         )
 

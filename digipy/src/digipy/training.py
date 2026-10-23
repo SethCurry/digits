@@ -4,8 +4,6 @@ from dataclasses import dataclass
 import numpy
 import tensorflow
 import tensorflow.keras as keras
-from digipy.capture import Frame, load_json_frames
-from digipy.gestures import Gesture, parse_gesture
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
 from tensorflow.keras.backend import expand_dims
@@ -23,6 +21,9 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import plot_model, to_categorical
+
+from digipy.capture import Frame, load_json_frames
+from digipy.gestures import Gesture, parse_gesture
 
 
 def average(one: float, two: float):
@@ -94,20 +95,20 @@ class SkeletalHGRFrame(BaseModel):
                 )
 
                 fingers[finger.name] = SkeletalFinger(
-                    first_knuckle,
-                    second_knuckle,
-                    third_knuckle,
-                    tip,
+                    first_knuckle=first_knuckle,
+                    second_knuckle=second_knuckle,
+                    third_knuckle=third_knuckle,
+                    tip=tip,
                 )
 
             skelFrame = SkeletalHGRFrame(
-                fingers["Thumb"],
-                fingers["Index"],
-                fingers["Middle"],
-                fingers["Ring"],
-                fingers["Pinky"],
-                palm_position,
-                wrist_position,
+                thumb=fingers["Thumb"],
+                index=fingers["Index"],
+                middle=fingers["Middle"],
+                ring=fingers["Ring"],
+                pinky=fingers["Pinky"],
+                palm=palm_position,
+                wrist=wrist_position,
             )
 
             skelFrames.append(skelFrame)
@@ -129,23 +130,35 @@ class SkeletalHGRFrame(BaseModel):
 @dataclass
 class LoadedSample:
     answer: Gesture
-    samples: SkeletalHGRFrame
+    samples: list[SkeletalHGRFrame]
 
 
-def load_data_dir(path: str):
+def load_data_dir(path: str, duration: int = 50):
     answer_path = path + "/answer.txt"
-    sample_path = path + "/sample.json"
+
+    all_samples = []
+
+    sample_files = [x for x in os.listdir(path) if x.endswith(".json")]
 
     with open(answer_path, "r") as fd:
         answer_text = fd.read().strip()
 
     answer = parse_gesture(answer_text)
 
-    raw_samples = load_json_frames(sample_path)
+    for sample_file in sample_files:
+        sample_path = path + "/" + sample_file
+        raw_samples = load_json_frames(sample_path)
 
-    samples = [SkeletalHGRFrame.from_capture(x) for x in raw_samples]
+        samples = []
+        [samples.extend(SkeletalHGRFrame.from_capture(x)) for x in raw_samples]
 
-    return LoadedSample(answer=answer, samples=samples)
+        if len(samples) != duration:
+            continue
+
+        loaded = LoadedSample(answer=answer, samples=samples)
+        all_samples.append(loaded)
+
+    return all_samples
 
 
 force_use_cpu = False
@@ -164,7 +177,7 @@ if force_use_cpu:
     )
 
 
-def create_model(n_classes=14, duration=100, n_channels=66, dropout_probability=0.2):
+def create_model(n_classes=3, duration=50, n_channels=66, dropout_probability=0.2):
     # Define model, using functional API
     model_input = Input(shape=(duration, n_channels))
 
@@ -237,34 +250,32 @@ class TrainingDatasets:
 
 
 def load_sample_data(
-    samples_dir: str = "../training/data", training_per_validate: int = 4
+    samples_dir: str = "../training/data", training_per_validate: int = 4, n_classes: int = 3
 ):
     sample_dirs = os.listdir(samples_dir)
-    samples = [load_data_dir(samples_dir + x) for x in sample_dirs]
+    samples = []
+    [samples.extend(load_data_dir(samples_dir + "/" + x)) for x in sample_dirs]
 
-    x_samples = []
-    y_samples = []
+    x_samples: list[LoadedSample] = []
+    y_samples: list[LoadedSample] = []
 
     for i, t in enumerate(samples):
-        if i % training_per_validate:
+        if len(t.samples) != 50:
+            continue
+        if i % training_per_validate == 0:
             y_samples.append(t)
         else:
             x_samples.append(t)
 
-    x_train = numpy.array([x.sample.to_frame() for x in x_samples])
-    x_test = numpy.array([x.answer for x in x_samples])
-    y_train = numpy.array([x.sample.to_frame() for x in y_samples])
-    y_test = numpy.array([x.answer for x in y_samples])
 
-    # Ensure the label values are between 0 and n_classes-1
-    if y_train.min() > 0:
-        y_train = y_train - 1
-    if y_test.min() > 0:
-        y_test = y_test - 1
+    x_train = numpy.array([list(map(lambda i: i.to_frame(), x.samples)) for x in x_samples])
+    x_test = numpy.array([x.answer.value for x in x_samples])
+    y_train = numpy.array([list(map(lambda i: i.to_frame(), x.samples)) for x in y_samples])
+    y_test = numpy.array([x.answer.value for x in y_samples])
 
     # Transform the labels to one-hot encoding for the cross-entropy loss
-    y_train = to_categorical(y_train, num_classes=n_classes)
     y_test = to_categorical(y_test, num_classes=n_classes)
+    x_test = to_categorical(x_test, num_classes=n_classes)
 
     return TrainingDatasets(
         x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test
@@ -291,20 +302,6 @@ def plot_history(history: History):
     plt.show()
 
 
-def pipeline(outPath: str):
-    model = create_model()
-
-    model.summary()
-
-    plot_model(model, to_file="model.png", show_shapes=True)
-
-    datasets = load_sample_data()
-
-    train(model, datasets)
-
-    model.save_weights(outPath)
-
-
 class GestureModel:
     def __init__(self, load_model_path: str | None = None):
         self.model = create_model()
@@ -316,7 +313,7 @@ class GestureModel:
         learning_rate = 0.001
 
         # We use Adam to optimize a multi-class classification task
-        optimizer = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-8)
+        optimizer = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-8)
         loss = "categorical_crossentropy"
         metrics = ["accuracy"]
         self.model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
@@ -326,8 +323,8 @@ class GestureModel:
         # ...with an existing validation set:
         history = self.model.fit(
             datasets.x_train,
-            datasets.y_train,
-            validation_data=(datasets.x_test, datasets.y_test),
+            datasets.x_test,
+            validation_data=(datasets.y_train, datasets.y_test),
             epochs=100,
             batch_size=32,
         )
