@@ -1,50 +1,54 @@
-#ifndef INCLUDE_LIBDIGITS_HPP_
-#define INCLUDE_LIBDIGITS_HPP_
+#pragma once
+
 #include "Leap.h"
+
+#include <array>
+#include <string>
 #include <vector>
 
-using namespace Leap;
+// Shared array constants. `inline` (C++17) gives them a single address across
+// translation units without requiring a separate definition in a .cpp file.
+inline const std::array<std::string, 5> fingerNames = {
+    "Thumb", "Index", "Middle", "Ring", "Pinky"};
+inline const std::array<std::string, 4> boneNames = {
+    "Metacarpal", "Proximal", "Middle", "Distal"};
+inline const std::array<std::string, 4> stateNames = {
+    "STATE_INVALID", "STATE_START", "STATE_UPDATE", "STATE_END"};
 
+inline constexpr int FORMAT_FULL = 0;
+inline constexpr int FORMAT_MODEL = 1;
 
-const std::string fingerNames[] = {"Thumb", "Index", "Middle", "Ring", "Pinky"};
-const std::string boneNames[] = {"Metacarpal", "Proximal", "Middle", "Distal"};
-const std::string stateNames[] = {"STATE_INVALID", "STATE_START",
-                                  "STATE_UPDATE", "STATE_END"};
+// Command-line flags shared between the CLI front-end and the listener.
+struct Flags {
+    long interval = 50;
+    int format = FORMAT_FULL;
+};
 
 void logFrame(Leap::Frame frame);
 void logModelFrame(Leap::Frame frame);
 
-class Flags {
-    public:
-        long interval;
-        int format;
-};
+std::vector<float> modelInputs(Leap::Hand hand);
 
-std::vector<float> modelInputs(Hand hand);
+// Parses recognized flags (--interval, --format) from argv into `flags`.
+void parse_cli_flags(int argc, const char* argv[], Flags& flags);
 
-void parse_cli_flags(int argc, const char* argv[], Flags *flags);
-
-#define FORMAT_FULL 0
-#define FORMAT_MODEL 1
-
-class LibdigitsListener : public Listener {
-    int format = 0;
+class LibdigitsListener : public Leap::Listener {
+    int format = FORMAT_FULL;
     long lastEmit = 0;
     long interval = 50;
 
 public:
-    void setInterval(long);
-    void setFormat(int);
-    virtual void onInit(const Controller&);
-    virtual void onConnect(const Controller&);
-    virtual void onDisconnect(const Controller&);
-    virtual void onExit(const Controller&);
-    virtual void onFrame(const Controller&);
-    virtual void onFocusGained(const Controller&);
-    virtual void onFocusLost(const Controller&);
-    virtual void onDeviceChange(const Controller&);
-    virtual void onServiceConnect(const Controller&);
-    virtual void onServiceDisconnect(const Controller&);
-};
+    void setInterval(long newInterval);
+    void setFormat(int newFormat);
 
-#endif
+    void onInit(const Leap::Controller&) override;
+    void onConnect(const Leap::Controller&) override;
+    void onDisconnect(const Leap::Controller&) override;
+    void onExit(const Leap::Controller&) override;
+    void onFrame(const Leap::Controller&) override;
+    void onFocusGained(const Leap::Controller&) override;
+    void onFocusLost(const Leap::Controller&) override;
+    void onDeviceChange(const Leap::Controller&) override;
+    void onServiceConnect(const Leap::Controller&) override;
+    void onServiceDisconnect(const Leap::Controller&) override;
+};

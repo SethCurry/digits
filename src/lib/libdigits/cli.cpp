@@ -1,75 +1,64 @@
+#include "libdigits.hpp"
+
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "./include/libdigits.hpp"
-#include <iostream>
-
-
 
 using string_map = std::unordered_map<std::string, std::vector<std::string>>;
+
+// Splits a list of argv-style tokens into a map keyed by recognized flags,
+// where each value is the list of tokens that followed that flag. Unknown
+// tokens are attached to the most recently seen flag (or "" before any flag).
 template <class Keyword>
-string_map generic_parse(std::vector<std::string> as, Keyword keyword)
-{
+static string_map generic_parse(std::vector<std::string> args, Keyword keyword) {
     string_map result;
 
     std::string flag;
-    for(auto&& x : as)
-    {
-        auto f = keyword(x);
-        if(f.empty())
-        {
-            result[flag].push_back(x);
-        }
-        else
-        {
-            flag = f.front();
-            result[flag]; // Ensure the flag exists
-            flag = f.back();
+    for (auto&& token : args) {
+        auto matched = keyword(token);
+        if (matched.empty()) {
+            result[flag].push_back(token);
+        } else {
+            flag = matched.front();
+            result[flag]; // Ensure the flag key exists even with no values.
+            flag = matched.back();
         }
     }
     return result;
 }
 
-
-void parse_cli_flags(int argc, const char* argv[], Flags *flags)
-{
+void parse_cli_flags(int argc, const char* argv[], Flags& flags) {
     std::vector<std::string> args(argv + 1, argv + argc);
 
-
-    std::unordered_map<std::string, std::string> keys = {
+    const std::unordered_map<std::string, std::string> keys = {
         {"--interval", "--interval"},
-        {"--format", "--format"}
+        {"--format", "--format"},
     };
 
-    auto result = generic_parse(args, [&](auto&& s) -> std::vector<std::string> {
-        if(keys.count(s) > 0)
-            return {keys[s]};
-        else
+    const auto result = generic_parse(
+        args, [&](const std::string& s) -> std::vector<std::string> {
+            auto it = keys.find(s);
+            if (it != keys.end()) {
+                return {it->second};
+            }
             return {};
-    });
+        });
 
-    auto intervalString = result.find("--interval");
-    if (intervalString._M_cur != NULL) {
-        auto toParse = intervalString->second.front().data();
-
-        auto interval = std::stol(toParse);
-        flags->interval = interval;
+    if (auto it = result.find("--interval"); it != result.end()) {
+        flags.interval = std::stol(it->second.front());
     }
 
-    auto formatString = result.find("--format");
-    if (formatString._M_cur != NULL) {
-      auto format = std::string(formatString->second.front().data());
+    if (auto it = result.find("--format"); it != result.end()) {
+        const std::string format = it->second.front();
+        std::cerr << format << std::endl;
 
-      std::cerr << format << std::endl;
-
-      if (format.compare("full") == 0) {
-          std::cerr << "Using full format" << std::endl;
-        flags->format = 0;
-      }
-
-      if (format.compare("model") == 0) {
-        std::cerr << "Using model format" << std::endl;
-          flags->format = 1;
-      };
+        if (format == "full") {
+            std::cerr << "Using full format" << std::endl;
+            flags.format = FORMAT_FULL;
+        } else if (format == "model") {
+            std::cerr << "Using model format" << std::endl;
+            flags.format = FORMAT_MODEL;
+        }
     }
 }

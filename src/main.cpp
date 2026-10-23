@@ -17,7 +17,7 @@ using namespace Leap;
 int main(int argc, const char** argv) {
   Flags cliFlags = {50, 0};
 
-  parse_cli_flags(argc, argv, &cliFlags);
+  parse_cli_flags(argc, argv, cliFlags);
 
   // Create a sample listener and controller
   LibdigitsListener listener;

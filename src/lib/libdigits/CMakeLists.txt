@@ -1,6 +1,12 @@
+add_library(libdigits SHARED
+    cli.cpp
+    listener.cpp
+    logging.cpp
+)
 
-set( libdigits_SOURCES cli.cpp logging.cpp listener.cpp )
-add_library( libdigits SHARED )
-target_sources( libdigits PUBLIC ${libdigits_SOURCES})
+target_compile_features(libdigits PUBLIC cxx_std_17)
 
-target_include_directories(libdigits INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(libdigits PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${PROJECT_SOURCE_DIR}/include"
+)

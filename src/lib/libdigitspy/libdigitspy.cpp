@@ -1,39 +1,36 @@
+#include "libdigitspy.hpp"
+
+#include "libdigits.hpp"
 
 #include <chrono>
 #include <iostream>
-#include "Leap.h"
-#include "./include/libdigitspy.hpp"
-#include "libdigits.hpp"
-#include <chrono>
 #include <thread>
-
-using namespace Leap;
 
 namespace sc = std::chrono;
 
-static LibdigitspyListener listener;
-static Controller controller;
-
+namespace {
+LibdigitspyListener listener;
+Leap::Controller controller;
+}  // namespace
 
 extern "C" {
-    void start_listener(int interval, int duration) {
-        // Create a sample listener and controller
-        listener.setInterval(interval);
-        //listener.setBufferSize(duration);
 
-        // Have the sample listener receive events from the controller
-        controller.addListener(listener);
-    }
-
-    void get_frames(float **dest) {
-      while (!listener.full) {
-         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-        listener.getFrames(dest);
-    }
+// `duration` is accepted for ABI compatibility with the Python binding but is
+// currently unused; the buffer size is fixed at the listener's default.
+void start_listener(int interval, int duration) {
+    (void)duration;
+    listener.setInterval(interval);
+    controller.addListener(listener);
 }
 
+void get_frames(float** dest) {
+    while (!listener.full) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    listener.getFrames(dest);
+}
 
+}  // extern "C"
 
 void LibdigitspyListener::setInterval(long newInterval) {
     interval = newInterval;
@@ -43,94 +40,84 @@ void LibdigitspyListener::setBufferSize(int newBufferSize) {
     bufferSize = newBufferSize;
 }
 
-void LibdigitspyListener::onInit(const Controller& controller) {
-  std::cerr << "Initialized" << std::endl;
+void LibdigitspyListener::onInit(const Leap::Controller&) {
+    std::cerr << "Initialized\n";
 }
 
-void LibdigitspyListener::onConnect(const Controller& controller) {
-  std::cerr << "Connected" << std::endl;
+void LibdigitspyListener::onConnect(const Leap::Controller&) {
+    std::cerr << "Connected\n";
 }
 
-void LibdigitspyListener::onDisconnect(const Controller& controller) {
-  // Note: not dispatched when running in a debugger.
-  std::cerr << "Disconnected" << std::endl;
+void LibdigitspyListener::onDisconnect(const Leap::Controller&) {
+    // Note: not dispatched when running in a debugger.
+    std::cerr << "Disconnected\n";
 }
 
-void LibdigitspyListener::onExit(const Controller& controller) {
-  std::cerr << "Exited" << std::endl;
+void LibdigitspyListener::onExit(const Leap::Controller&) {
+    std::cerr << "Exited\n";
 }
 
-void LibdigitspyListener::onFrame(const Controller &controller) {
-    auto time = sc::system_clock::now(); // get the current time
-    auto since_epoch = time.time_since_epoch(); // get the duration since epoch
+void LibdigitspyListener::onFrame(const Leap::Controller& controller) {
+    const auto now = sc::duration_cast<sc::milliseconds>(
+                         sc::system_clock::now().time_since_epoch())
+                         .count();
 
-    // I don't know what system_clock returns
-    // I think it's uint64_t nanoseconds since epoch
-    // Either way this duration_cast will do the right thing
-    auto millis = sc::duration_cast<sc::milliseconds>(since_epoch);
+    if (now < lastEmit + interval) {
+        return;
+    }
 
-    long now = millis.count(); // just like java (new Date()).getTime();
+    const Leap::Frame frame = controller.frame();
+    const Leap::HandList hands = frame.hands();
+    if (hands.count() != 1) {
+        return;
+    }
 
-    if (now >= lastEmit + interval) {
-        const Frame frame = controller.frame();
-          if (frame.hands().count() < 1 || frame.hands().count() > 1) {
-            return;
-          }
+    for (const Leap::Hand& hand : hands) {
+        std::vector<float> inputs = modelInputs(hand);
 
-          // Emit one comma-separated line of model inputs per hand.
-          HandList hands = frame.hands();
-
-          for (HandList::const_iterator hl = hands.begin(); hl != hands.end(); ++hl) {
-            const Hand hand = *hl;
-            std::vector<float> inputs = modelInputs(hand);
-
-            std::lock_guard<std::mutex> guard(bufferedFramesMut);
-
-            auto pos = bufferedFrames.begin();
-            bufferedFrames.insert(pos, inputs);
-
-            while (bufferedFrames.size() > bufferSize) {
-              if (!full) {
-                full = true;
-              }
-                bufferedFrames.pop_back();
-            }
-          };
-          lastEmit = now;
-        };
-    };
-
-    void LibdigitspyListener::getFrames(float **into) {
         std::lock_guard<std::mutex> guard(bufferedFramesMut);
-    for (size_t i = 0; i < bufferSize; i++) {
-        for (int j = 0; j < 66; j++) {
-            into[i][j] = bufferedFrames.at(i).at(j);
+        bufferedFrames.insert(bufferedFrames.begin(), std::move(inputs));
+
+        while (static_cast<int>(bufferedFrames.size()) > bufferSize) {
+            full = true;
+            bufferedFrames.pop_back();
+        }
+    }
+
+    lastEmit = now;
+}
+
+void LibdigitspyListener::getFrames(float** into) {
+    std::lock_guard<std::mutex> guard(bufferedFramesMut);
+    for (int i = 0; i < bufferSize; ++i) {
+        const auto& frame = bufferedFrames.at(static_cast<std::size_t>(i));
+        for (int j = 0; j < kInputsPerFrame; ++j) {
+            into[i][j] = frame.at(static_cast<std::size_t>(j));
         }
     }
 }
 
-void LibdigitspyListener::onFocusGained(const Controller& controller) {
-  std::cerr << "Focus Gained" << std::endl;
+void LibdigitspyListener::onFocusGained(const Leap::Controller&) {
+    std::cerr << "Focus Gained\n";
 }
 
-void LibdigitspyListener::onFocusLost(const Controller& controller) {
-  std::cerr << "Focus Lost" << std::endl;
+void LibdigitspyListener::onFocusLost(const Leap::Controller&) {
+    std::cerr << "Focus Lost\n";
 }
 
-void LibdigitspyListener::onDeviceChange(const Controller& controller) {
-  std::cout << "Device Changed" << std::endl;
-  const DeviceList devices = controller.devices();
-
-  for (int i = 0; i < devices.count(); ++i) {
-    std::cerr << "id: " << devices[i].toString() << std::endl;
-    std::cerr << "  isStreaming: " << (devices[i].isStreaming() ? "true" : "false") << std::endl;
-  }
+void LibdigitspyListener::onDeviceChange(const Leap::Controller& controller) {
+    std::cerr << "Device Changed\n";
+    const Leap::DeviceList devices = controller.devices();
+    for (const Leap::Device& device : devices) {
+        std::cerr << "id: " << device.toString() << "\n";
+        std::cerr << "  isStreaming: " << (device.isStreaming() ? "true" : "false") << "\n";
+    }
 }
 
-void LibdigitspyListener::onServiceConnect(const Controller& controller) {
-  std::cerr << "Service Connected" << std::endl;
+void LibdigitspyListener::onServiceConnect(const Leap::Controller&) {
+    std::cerr << "Service Connected\n";
 }
 
-void LibdigitspyListener::onServiceDisconnect(const Controller& controller) {
-  std::cerr << "Service Disconnected" << std::endl;
+void LibdigitspyListener::onServiceDisconnect(const Leap::Controller&) {
+    std::cerr << "Service Disconnected\n";
 }
