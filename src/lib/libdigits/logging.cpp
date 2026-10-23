@@ -22,7 +22,7 @@ Vector avgVectors(const Vector &one, const Vector &two) {
 
 
 // Builds the flat list of inputs used by the inference model, in the same
-// order as SkeletalHGRFrame.to_frame() in pywoop/training.py.
+// order as SkeletalHGRFrame.to_frame() in digipy/training.py.
 //
 // For each finger in [thumb, index, middle, ring, pinky] we emit the
 // first_knuckle, second_knuckle, third_knuckle and tip positions (each as
