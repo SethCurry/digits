@@ -1,13 +1,19 @@
 # digits
 
 `digits` is a hand-gesture recognition toolkit built on top of the [Leap Motion]
-hand-tracking controller. It has three parts that work together:
+hand-tracking controller.
+
+It is based on https://github.com/guillaumephd/deep_learning_hand_gesture_recognition, which is in turn based on this paper:
+
+G. Devineau, F. Moutarde, W. Xi and J. Yang, "Deep Learning for Hand Gesture Recognition on Skeletal Data," 2018 13th IEEE International Conference on Automatic Face & Gesture Recognition (FG 2018), Xi'an, China, 2018, pp. 106-113, doi: 10.1109/FG.2018.00025
+
+It has three parts that work together:
 
 1. A **C++ binary** (`digits`) and supporting shared libraries that connect to the
    Leap Motion service and stream hand-tracking frames, either as full JSON
    documents or as a flat 66-float "model" feature vector per hand.
 2. A **C shared library** (`libdigitspy`) that implements an interface to Leap from Python
-3. A **Python package** (`digipy`) that consumes those frames using a reusable numpy buffer.
+3. A **Python package** (`digipy`) that consumes those frames using a reusable numpy buffer to reduce allocations.
 
 The recognition model is a multi-channel 1D CNN (see `digipy/training.py`) that
 classifies a sliding window of 50 frames × 66 features into one of a small set of

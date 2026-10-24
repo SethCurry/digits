@@ -20,17 +20,7 @@ inline const std::array<std::string, 4> stateNames = {
 inline constexpr int FORMAT_FULL = 0;
 inline constexpr int FORMAT_MODEL = 1;
 
-// Command-line flags shared between the CLI front-end and the listener.
-struct Flags {
-    long interval = 50;
-    int format = FORMAT_FULL;
-};
-
 std::vector<float> modelInputs(Leap::Hand hand);
-
-// Parses recognized flags (--interval, --format) from argv into `flags`.
-void parse_cli_flags(int argc, const char* argv[], Flags& flags);
-
 
 // Logs frames either to standard output or to a file, depending on the
 // output path given at construction ("stdout" means standard output).
