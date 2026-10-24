@@ -3,6 +3,8 @@
 #include "Leap.h"
 
 #include <array>
+#include <fstream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -24,22 +26,43 @@ struct Flags {
     int format = FORMAT_FULL;
 };
 
-void logFrame(Leap::Frame frame);
-void logModelFrame(Leap::Frame frame);
-
 std::vector<float> modelInputs(Leap::Hand hand);
 
 // Parses recognized flags (--interval, --format) from argv into `flags`.
 void parse_cli_flags(int argc, const char* argv[], Flags& flags);
 
+
+// Logs frames either to standard output or to a file, depending on the
+// output path given at construction ("stdout" means standard output).
+class ModelLogger
+{
+    private:
+        // Owns the output file when logging to a path; unused for stdout.
+        std::ofstream file;
+        // Points at std::cout or at the owned `file` above.
+        std::ostream* output;
+    public:
+        ModelLogger(std::string outPath);
+
+        // `output` points into this object, so copying or moving a logger
+        // would leave the destination's pointer dangling; it is neither
+        // copyable nor movable.
+        ModelLogger(const ModelLogger&) = delete;
+        ModelLogger& operator=(const ModelLogger&) = delete;
+
+        void logFrame(Leap::Frame frame) const;
+        void logModelFrame(Leap::Frame frame) const;
+};
+
+
 class LibdigitsListener : public Leap::Listener {
     int format = FORMAT_FULL;
     long lastEmit = 0;
     long interval = 50;
+    ModelLogger output;
 
 public:
-    void setInterval(long newInterval);
-    void setFormat(int newFormat);
+    LibdigitsListener(std::string outputPath, int format, long interval);
 
     void onInit(const Leap::Controller&) override;
     void onConnect(const Leap::Controller&) override;

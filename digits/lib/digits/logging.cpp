@@ -3,7 +3,9 @@
 #include "json.hpp"
 
 #include <array>
+#include <fstream>
 #include <iostream>
+#include <istream>
 #include <vector>
 
 using namespace Leap;
@@ -133,7 +135,21 @@ static json handToJson(const Hand& hand) {
     return j;
 }
 
-void logFrame(Frame frame) {
+ModelLogger::ModelLogger(std::string outPath) {
+    if (outPath == "stdout") {
+        output = &std::cout;
+    } else {
+        file.open(outPath);
+        output = &file;
+        if (!file.is_open()) {
+            std::cerr << "Failed to open output file " << outPath
+                      << "; logging to stdout instead" << std::endl;
+            output = &std::cout;
+        }
+    }
+}
+
+void ModelLogger::logFrame(Frame frame) const {
     if (frame.hands().count() < 1) {
         return;
     }
@@ -153,27 +169,29 @@ void logFrame(Frame frame) {
     }
     j["hands"] = handsVec;
 
-    std::cout << j.dump() << std::endl;
+    *output << j.dump() << std::endl;
 }
 
-void logModelFrame(Frame frame) {
+void ModelLogger::logModelFrame(Frame frame) const {
     if (frame.hands().count() < 1) {
         return;
     }
 
     // Emit one comma-separated line of model inputs per hand.
     const HandList hands = frame.hands();
+
+    std::ostream& out = *output;
     for (const Hand& hand : hands) {
         const std::vector<float> inputs = modelInputs(hand);
 
         bool first = true;
         for (const float value : inputs) {
             if (!first) {
-                std::cout << ",";
+                out << ",";
             }
-            std::cout << value;
+            out << value;
             first = false;
         }
-        std::cout << std::endl;
+        out << std::endl;
     }
 }

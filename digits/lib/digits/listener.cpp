@@ -1,19 +1,16 @@
-#include "libdigits.hpp"
+#include "./include/libdigits.hpp"
 
 #include <chrono>
+#include <fstream>
 #include <iostream>
 
 using namespace Leap;
 
 namespace sc = std::chrono;
 
-void LibdigitsListener::setInterval(long newInterval) {
-    interval = newInterval;
-}
+LibdigitsListener::LibdigitsListener(std::string outputPath, int format, long interval)
+    : format(format), interval(interval), output(outputPath) {}
 
-void LibdigitsListener::setFormat(int newFormat) {
-    format = newFormat;
-}
 
 void LibdigitsListener::onInit(const Controller&) {
     std::cerr << "Initialized" << std::endl;
@@ -44,9 +41,9 @@ void LibdigitsListener::onFrame(const Controller& controller) {
         const Frame frame = controller.frame();
 
         if (format == FORMAT_FULL) {
-            logFrame(frame);
+                output.logFrame(frame);
         } else if (format == FORMAT_MODEL) {
-            logModelFrame(frame);
+                output.logModelFrame(frame);
         }
 
         lastEmit = now;
