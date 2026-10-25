@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import subprocess
+import threading
+from pathlib import Path
 
 import structlog
+import yaml
+from pydantic import BaseModel
 
 from digipy import training
 
@@ -33,6 +38,48 @@ structlog.configure(
 log = structlog.get_logger()
 
 
+class ConfigGesture(BaseModel):
+    training_data_dir: str
+    on_trigger: str | None = None
+    on_end: str | None = None
+    debounce_seconds: int | None = None
+
+
+class Config(BaseModel):
+    gestures: dict[str, ConfigGesture]
+    interval_ms: int = 20
+    duration_frames: int = 50
+    debounce_seconds: int = 1
+    on_trigger: str | None = None
+    on_end: str | None = None
+
+    @property
+    def gesture_names(self) -> list[str]:
+        """The configured gesture names, in class-index order.
+
+        The position of a gesture in this list is the index of its class in
+        the model's output, so the order in the config file must stay stable
+        between training and inference.
+        """
+        return sorted(self.gestures)
+
+
+def load_config(path: str | Path) -> Config:
+    """Load a YAML config file into a :class:`Config` instance.
+
+    See ``docs/config.sample.yml`` for the expected format.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"config file not found: {path} "
+            "(copy docs/config.sample.yml to get started)"
+        )
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return Config.model_validate(data)
+
+
 def _run_animate_hand(args: argparse.Namespace) -> None:
     # Imported lazily so that CLI startup (and other subcommands) do not pay
     # for the matplotlib/numpy imports of digipy.animate_hand.
@@ -46,17 +93,27 @@ def _run_label_hand(args: argparse.Namespace) -> None:
     # which we only want when actually launching the viewer.
     from digipy.label_hand import run
 
-    run(args)
+    gestures = load_config(args.config).gesture_names
+    run(args, gestures)
 
 
 def _train_model(args: argparse.Namespace) -> None:
     """Train a gesture model from labeled samples and save the weights."""
-    model = training.GestureModel()
+    # The set of gestures (and thus the model's output size) comes from the
+    # config file rather than a hard-coded list.
+    gestures = load_config(args.config).gesture_names
+    model = training.GestureModel(gestures)
 
-    samples = training.load_sample_data(args.training_data)
+    samples = training.load_sample_data(args.training_data, gestures)
     history = model.train(samples)
     training.plot_history(history)
     model.save_weights(args.output)
+
+
+def spawn_command(cmd: str):
+    threading.Thread(
+        target=subprocess.run, args=(cmd), kwargs={"shell": True}, daemon=True
+    ).start()
 
 
 def _run_inference(args: argparse.Namespace) -> None:
@@ -65,14 +122,20 @@ def _run_inference(args: argparse.Namespace) -> None:
     import numpy as np
 
     from digipy import libdigits
-    from digipy.gestures import Gesture
     from digipy.training import GestureModel
+
+    # Gesture names (in class-index order) come from the config file.
+    config = load_config(args.config)
+    gestures = config.gestures
+    gesture_names = config.gesture_names
 
     libdigits.start_listener(args.interval, args.duration)
 
     log.info("loading model weights", model_path=args.model)
-    model = GestureModel(load_model_path=args.model)
+    model = GestureModel(gesture_names, load_model_path=args.model)
     log.info("model loaded")
+
+    last_gesture: str | None = None
 
     try:
         while True:
@@ -81,12 +144,28 @@ def _run_inference(args: argparse.Namespace) -> None:
             sample = sample[np.newaxis, ...]
             probabilities = model.model.predict(sample, verbose=1)
             predicted_class = int(probabilities.argmax(axis=-1)[0])
-            gesture = Gesture(predicted_class)
+
+            gesture_name = gesture_names[predicted_class]
             log.info(
                 "gesture detected",
-                gesture=gesture.name,
+                gesture=gesture_name,
                 confidence=float(probabilities[0][predicted_class]),
             )
+
+            if gesture_name in gestures:
+                gesture = gestures["gesture_name"]
+
+                if gesture.on_trigger != None:
+                    spawn_command(gesture.on_trigger)
+
+                if last_gesture is not None and last_gesture in gestures:
+                    found_last = gestures[last_gesture]
+
+                    if found_last.on_end is not None:
+                        spawn_command(found_last.on_end)
+
+            last_gesture = gesture_name
+
     except KeyboardInterrupt:
         log.info("interrupted")
 
@@ -113,6 +192,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         default="./model.weights.h5",
         help="The location to output the trained model weights to.",
+    )
+    train.add_argument(
+        "-c",
+        "--config",
+        default="../config.yml",
+        help=(
+            "Path to the YAML config file defining the gesture set "
+            "(see docs/config.sample.yml)."
+        ),
     )
     train.set_defaults(func=_train_model)
 
@@ -172,6 +260,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=33,
         help="ms between frames when playing (default 33 ~= 30 fps)",
     )
+    label.add_argument(
+        "-c",
+        "--config",
+        default="../config.yml",
+        help=(
+            "Path to the YAML config file defining the gesture set "
+            "(see docs/config.sample.yml)."
+        ),
+    )
     label.set_defaults(func=_run_label_hand)
 
     inference = subparsers.add_parser(
@@ -210,6 +307,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Number of frames per inference window (model input length).",
+    )
+    inference.add_argument(
+        "-c",
+        "--config",
+        default="../config.yml",
+        help=(
+            "Path to the YAML config file defining the gesture set "
+            "(see docs/config.sample.yml)."
+        ),
     )
     inference.set_defaults(func=_run_inference)
 

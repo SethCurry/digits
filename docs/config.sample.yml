@@ -1,0 +1,19 @@
+# Sample digipy configuration. Copy to config.yml (or pass --config) and
+# adjust. See digipy/src/digipy/cli.py (Config) for the full schema.
+#
+# The `gestures` mapping defines the gesture set: each key is a gesture
+# name, and the order in which the gestures are declared here defines each
+# gesture's class index in the model (index 0 = the first gesture listed).
+# Keep the order stable between training and inference. `none` is the
+# catch-all "no gesture" class and needs training data too.
+
+interval_ms: 20
+duration_frames: 50
+debounce_seconds: 5
+
+gestures:
+    name:
+        training_data_dir: "/some-folder"
+        on_trigger: "some-command"
+        on_end: "some-command"
+        debounce_seconds: 5

@@ -47,7 +47,7 @@ of frames at once.
 
 You're free to change those, just make sure that you record your training at the same frame rate
 you do inference at, and that your training samples are split into files according to the
-window size.  A window size of 50 means 50 lines per file, 20 would be 20 lines, etc.
+window size. A window size of 50 means 50 lines per file, 20 would be 20 lines, etc.
 
 ## How the pieces fit together
 
@@ -64,7 +64,7 @@ explain most of the rules below:
    `digipy/src/digipy/training.py`), so adding a gesture is just an enum
    change — but it still means retraining from scratch, since the output
    layer changes size and old weight files no longer match it.
-3. **Training data is a directory tree.** `digipy train` loads *every*
+3. **Training data is a directory tree.** `digipy train` loads _every_
    directory under `training/data/`, so all gestures — old and new — are
    trained together in one run.
 
@@ -125,7 +125,7 @@ Previously saved weights will no longer match the resized output layer, so
 retraining from scratch is expected and automatic.
 
 > Do **not** add a new entry for `none` — `Gesture.NONE` (value `0`) already
-> exists. What `none` needs from you is *training data*, not an enum entry.
+> exists. What `none` needs from you is _training data_, not an enum entry.
 
 ## Step 3 — Create training samples
 
@@ -222,22 +222,22 @@ the dataset.
 ### Train the 'none' gesture
 
 The model is a softmax classifier: for **every** 1-second window it must
-output *some* class, whether or not a gesture is being performed. `none`
+output _some_ class, whether or not a gesture is being performed. `none`
 (`Gesture.NONE = 0`) is that catch-all class, and it is already in the enum —
 so "training the none gesture" means **recording windows where a hand is
 visible but no known gesture is being performed**:
 
 - a relaxed, open hand at rest,
 - slow, random movement around the field of view,
-- the transitions *into and out of* your other gestures,
-- anything else that is *not* one of the gestures you're training.
+- the transitions _into and out of_ your other gestures,
+- anything else that is _not_ one of the gestures you're training.
 
 Apply the same capture + labeling steps as above, with the label `none` (or
 `0`). Give it at least as many windows as your real gestures, and favor
 variety — the shipped `training/data/none-megalong/` directory is an example
 of a `none` dataset. If you see the recognizer firing your new gesture on a
-hand that's just sitting there, the fix is almost always *more and more
-varied `none` samples*.
+hand that's just sitting there, the fix is almost always _more and more
+varied `none` samples_.
 
 ### Verify the dataset
 
@@ -269,7 +269,7 @@ cd digipy
 uv run digipy train -t ../training/data -o ./model.weights.h5
 ```
 
-This loads *all* gesture directories (old and new), holds out every 4th
+This loads _all_ gesture directories (old and new), holds out every 4th
 window for validation, trains for 100 epochs, and then plots train/validation
 accuracy and loss. **Close the plot windows when you're done looking at
 them** — the weights are written to `model.weights.h5` only after the plots
@@ -322,16 +322,16 @@ Press **Ctrl+C** to quit. Things to try:
 
 ## Troubleshooting
 
-| Symptom | Likely cause and fix |
-| --- | --- |
-| `unknown gesture: ...` when labeling | The label isn't in `gestures.py` yet (add it first), or it isn't the enum name / integer — try `thumbs_up`, not `thumbs up` (underscores and spelling matter; capitalization doesn't). |
+| Symptom                                    | Likely cause and fix                                                                                                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unknown gesture: ...` when labeling       | The label isn't in `gestures.py` yet (add it first), or it isn't the enum name / integer — try `thumbs_up`, not `thumbs up` (underscores and spelling matter; capitalization doesn't).                     |
 | Training crashes with an index/shape error | A label's integer value is outside the range of the enum, or you're loading old weights into a model whose output layer changed size when you added a gesture. Retrain from scratch after any enum change. |
-| Fewer samples trained than you saved | Windows that aren't exactly 50 frames, or contain a two-hand frame, are silently skipped. Check with `wc -l` and re-record with one hand in view. |
-| `label-hand` saved 20-frame samples | Change the **save count** box to `50` (its default is 20). |
-| New gesture fires on relaxed/random hands | Not enough (or not enough varied) `none` data — record more `none` windows and retrain. |
-| One class never predicted | Too few or too similar samples for that class; add variety (position, orientation, speed). |
-| Inference can't load `liblibdigitspy.so` | Run from `digipy/` and set `DIGIPY_LIBDIGITS` as in Step 5 (or fix the default path in `libdigits.py`). |
-| No `Connected` message / empty capture | The Leap Motion service isn't running or the device isn't streaming. |
+| Fewer samples trained than you saved       | Windows that aren't exactly 50 frames, or contain a two-hand frame, are silently skipped. Check with `wc -l` and re-record with one hand in view.                                                          |
+| `label-hand` saved 20-frame samples        | Change the **save count** box to `50` (its default is 20).                                                                                                                                                 |
+| New gesture fires on relaxed/random hands  | Not enough (or not enough varied) `none` data — record more `none` windows and retrain.                                                                                                                    |
+| One class never predicted                  | Too few or too similar samples for that class; add variety (position, orientation, speed).                                                                                                                 |
+| Inference can't load `liblibdigitspy.so`   | Run from `digipy/` and set `DIGIPY_LIBDIGITS` as in Step 5 (or fix the default path in `libdigits.py`).                                                                                                    |
+| No `Connected` message / empty capture     | The Leap Motion service isn't running or the device isn't streaming.                                                                                                                                       |
 
 ## Checklist
 

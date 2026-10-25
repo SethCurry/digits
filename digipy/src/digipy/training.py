@@ -36,16 +36,12 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import plot_model, to_categorical
 
 from digipy.capture import Frame, load_json_frames
-from digipy.gestures import Gesture, parse_gesture
+from digipy.gestures import parse_gesture
 
 # Number of frames per sample and channels per frame.  Must match the model
 # input shape and the constants in digipy.libdigits.
 DURATION = 50
 N_CHANNELS = 66
-
-# Number of gesture classes, derived from the Gesture enum so adding a new
-# gesture automatically flows through to the model and dataset code.
-N_GESTURES = len(Gesture)
 
 
 def _midpoint(one: list[float], two: list[float]) -> list[float]:
@@ -153,7 +149,7 @@ class SkeletalHGRFrame(BaseModel):
 
 @dataclass
 class LoadedSample:
-    answer: Gesture
+    answer: str
     samples: list[SkeletalHGRFrame]
 
 
@@ -171,15 +167,21 @@ class TrainingDatasets:
     val_labels: np.ndarray
 
 
-def load_data_dir(path: str | Path, duration: int = DURATION) -> list[LoadedSample]:
+def load_data_dir(
+    path: str | Path, gestures: list[str], duration: int = DURATION
+) -> list[LoadedSample]:
     """Load all labeled samples from a single sample directory.
 
     A sample directory contains an ``answer.txt`` with the gesture label and
     one or more ``*.json`` JSONL files, each a sequence of frames making up
     one window.  Windows whose frame count != *duration* are skipped.
+    *gestures* is the list of configured gesture names (class-index order)
+    used to parse and validate the label.
     """
     path = Path(path)
-    answer = parse_gesture((path / "answer.txt").read_text(encoding="utf-8").strip())
+    answer = parse_gesture(
+        (path / "answer.txt").read_text(encoding="utf-8").strip(), gestures
+    )
 
     all_samples: list[LoadedSample] = []
     for sample_file in sorted(f for f in os.listdir(path) if f.endswith(".json")):
@@ -198,12 +200,15 @@ def load_data_dir(path: str | Path, duration: int = DURATION) -> list[LoadedSamp
 
 
 def create_model(
-    n_classes: int = N_GESTURES,
+    n_classes: int,
     duration: int = DURATION,
     n_channels: int = N_CHANNELS,
     dropout_probability: float = 0.2,
 ) -> Model:
-    """Build the multi-branch per-channel convolutional gesture model."""
+    """Build the multi-branch per-channel convolutional gesture model.
+
+    *n_classes* is the number of configured gestures (see
+    ``digipy.cli.Config.gesture_names``)."""
     model_input = Input(shape=(duration, n_channels))
 
     # Slice into per-channel inputs so each channel gets its own conv branch.
@@ -253,19 +258,22 @@ def create_model(
 
 
 def load_sample_data(
-    samples_dir: str | Path = "../training/data",
+    samples_dir: str | Path,
+    gestures: list[str],
     training_per_validate: int = 4,
-    n_classes: int = N_GESTURES,
 ) -> TrainingDatasets:
     """Load all sample directories under *samples_dir* and split into
     train / validation datasets.
+
+    *gestures* is the list of configured gesture names (class-index order);
+    it defines the label space, so the number of classes is ``len(gestures)``.
 
     Every ``training_per_validate``-th sample (by load order) is held out for
     validation; the rest are used for training.
     """
     samples: list[LoadedSample] = []
     for entry in sorted(os.listdir(samples_dir)):
-        samples.extend(load_data_dir(Path(samples_dir) / entry))
+        samples.extend(load_data_dir(Path(samples_dir) / entry, gestures))
 
     train_split: list[LoadedSample] = []
     val_split: list[LoadedSample] = []
@@ -278,16 +286,18 @@ def load_sample_data(
             train_split.append(sample)
 
     train_features = np.array(
-        [np.stack(s.to_frame() for s in x.samples) for x in train_split]
+        [np.stack([s.to_frame() for s in x.samples]) for x in train_split]
     )
     val_features = np.array(
-        [np.stack(s.to_frame() for s in x.samples) for x in val_split]
+        [np.stack([s.to_frame() for s in x.samples]) for x in val_split]
     )
     train_labels = to_categorical(
-        np.array([x.answer.value for x in train_split]), num_classes=n_classes
+        np.array([gestures.index(x.answer) for x in train_split]),
+        num_classes=len(gestures),
     )
     val_labels = to_categorical(
-        np.array([x.answer.value for x in val_split]), num_classes=n_classes
+        np.array([gestures.index(x.answer) for x in val_split]),
+        num_classes=len(gestures),
     )
 
     return TrainingDatasets(
@@ -324,8 +334,15 @@ def plot_history(history: History) -> None:
 class GestureModel:
     """Wrapper around the Keras gesture model with train/save/predict helpers."""
 
-    def __init__(self, load_model_path: str | Path | None = None):
-        self.model = create_model()
+    def __init__(self, gestures: list[str], load_model_path: str | Path | None = None):
+        """Build a model with one output class per configured gesture.
+
+        *gestures* is the list of configured gesture names (class-index
+        order); index *i* of the model's softmax output corresponds to
+        ``gestures[i]``.
+        """
+        self.gestures = gestures
+        self.model = create_model(n_classes=len(gestures))
         if load_model_path:
             self.model.load_weights(load_model_path)
 

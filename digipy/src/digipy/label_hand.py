@@ -28,15 +28,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider, TextBox
 
-from digipy.gestures import Gesture, parse_gesture
+from digipy.gestures import parse_gesture
 from digipy.hand_geometry import (
     compute_scene_bounds,
     load_frames,
     segments_for_frame,
 )
-
-# Known gesture labels, used as defaults/suggestions in the UI.
-GESTURE_LABELS = [g.name.lower() for g in Gesture]
 
 
 def _draw_frame(ax, segs, palms):
@@ -63,7 +60,7 @@ def _draw_frame(ax, segs, palms):
     return artists
 
 
-def _export_sample(frames, start, count, label, sample_name, out_root):
+def _export_sample(frames, start, count, label, sample_name, out_root, gestures):
     """
     Write frames[start : start+count] to ``out_root/<sample_name>`` as a labeled
     training sample (answer.txt + sample.json). Returns the path written.
@@ -72,8 +69,8 @@ def _export_sample(frames, start, count, label, sample_name, out_root):
     label = (label or "").strip()
     if not label:
         raise ValueError("no gesture label set")
-    # Validate the label parses to a known gesture.
-    parse_gesture(label)
+    # Validate the label parses to a configured gesture.
+    parse_gesture(label, gestures)
 
     count = int(count)
     if count <= 0:
@@ -106,11 +103,15 @@ def _export_sample(frames, start, count, label, sample_name, out_root):
     return out_dir
 
 
-def run(args: argparse.Namespace) -> None:
+def run(args: argparse.Namespace, gestures: list[str]) -> None:
     """
     Open the interactive viewer described by *args* (``input``,
     ``output``, ``play_interval``), as parsed by the ``label-hand``
     subcommand in ``digipy.cli``.
+
+    *gestures* is the list of configured gesture names (class-index order,
+    from ``digipy.cli.Config.gesture_names``), used to validate exported
+    labels and as the initial label in the UI.
     """
     in_path = Path(args.input)
     if not in_path.exists():
@@ -200,7 +201,7 @@ def run(args: argparse.Namespace) -> None:
 
     # Label text box
     label_ax = fig.add_axes([0.05, 0.13, 0.30, 0.05])
-    label_box = TextBox(label_ax, "label", initial=GESTURE_LABELS[0])
+    label_box = TextBox(label_ax, "label", initial=gestures[0])
 
     # Count text box (how many frames to save)
     count_ax = fig.add_axes([0.40, 0.13, 0.14, 0.05])
@@ -253,6 +254,7 @@ def run(args: argparse.Namespace) -> None:
                 label=label_box.text,
                 sample_name=name_box.text,
                 out_root=out_root,
+                gestures=gestures,
             )
             msg = f"saved {count_box.text} frames -> {out_dir}"
             print(msg)

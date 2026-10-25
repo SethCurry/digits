@@ -1,0 +1,18 @@
+# digipy configuration. The `gestures` mapping defines the gesture set: each
+# key is a gesture name, and its position here (declaration order) is its
+# class index in the model. The order below matches the previously
+# hard-coded Gesture enum (NONE = 0, FINGER_GUN = 1, PEACE_SIGN = 2), so
+# existing answer.txt files and trained weights keep their meaning.
+# Changing the gesture set or its order requires retraining from scratch.
+
+interval_ms: 20
+duration_frames: 50
+debounce_seconds: 1
+
+gestures:
+    none:
+        training_data_dir: "../training/data/none-megalong"
+    finger_gun:
+        training_data_dir: "../training/data/finger-gun"
+    peace_sign:
+        training_data_dir: "../training/data/peace-sign"
