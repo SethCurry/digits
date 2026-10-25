@@ -57,7 +57,7 @@ explain most of the rules below:
 1. **The model classifies fixed windows of frames.** One training sample is
    exactly **50 frames × 66 features** per frame (knuckle and tip positions
    for each finger, plus palm and wrist). At the default capture interval of
-   50 ms, one window is **2.5 seconds** of hand motion.
+   20 ms, one window is **1 second** of hand motion.
 2. **The set of gestures is an enum.** `digipy/src/digipy/gestures.py`
    defines the classes the model can output. The model's output-layer size is
    derived automatically from `len(Gesture)` (see the `N_GESTURES` constant in
@@ -173,7 +173,7 @@ new gesture:
   training windows and the live inference path assume.
 - Press **Enter** to stop recording.
 
-Hold the pose long enough to get several 50-frame windows (each 2.5 s of
+Hold the pose long enough to get several 50-frame windows (each 1 s of
 footage is one window). Repeat the capture a few times with the hand in
 different positions. You can eyeball a capture before labeling it:
 
@@ -199,8 +199,7 @@ uv run digipy label-hand capture.json -o ../training/data
 
 - Type the label in the **label** box (`thumbs_up`) — the gesture must
   already exist in `gestures.py`, or saving fails with `unknown gesture`.
-- **Set "save count" to `50`** — the box defaults to `20`, and non-50-frame
-  windows are silently dropped by training.
+- **Set "save count" to your window size** — frames that aren't that size will be silently dropped so they don't block training
 - Scrub to the start of a clean hold, then click **Save next N frames** (or
   press `s`). Each save writes a new sample directory (auto-named
   `thumbs_up_<timestamp>`, or use the sample-name box).
@@ -222,7 +221,7 @@ the dataset.
 
 ### Train the 'none' gesture
 
-The model is a softmax classifier: for **every** 2.5-second window it must
+The model is a softmax classifier: for **every** 1-second window it must
 output *some* class, whether or not a gesture is being performed. `none`
 (`Gesture.NONE = 0`) is that catch-all class, and it is already in the enum —
 so "training the none gesture" means **recording windows where a hand is
@@ -303,7 +302,7 @@ uv run digipy inference -m ./model.weights.h5
 > `_DEFAULT_LIB_PATH` in `digipy/src/digipy/libdigits.py`.
 
 The listener buffers the most recent 50 frames; the first prediction appears
-after the buffer fills (~2.5 s), and after that a prediction is printed for
+after the buffer fills (~1 s), and after that a prediction is printed for
 each window as fast as the model can run, e.g.:
 
 ```
@@ -313,7 +312,7 @@ gesture detected  gesture=THUMBS_UP  confidence=0.99
 Press **Ctrl+C** to quit. Things to try:
 
 1. Hold your new gesture steady — expect its name with high confidence
-   (~2.5 s after you settle into the pose).
+   (~1 s after you settle into the pose).
 2. Hold the pre-existing gestures (`finger-gun`, `peace-sign`) — they should
    still be recognized.
 3. Relax your hand and wave it around — expect `NONE`.
