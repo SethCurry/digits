@@ -152,7 +152,7 @@ def _run_inference(args: argparse.Namespace) -> None:
                 confidence=float(probabilities[0][predicted_class]),
             )
 
-            if gesture_name in gestures:
+            if gesture_name in gestures and gesture_name != last_gesture:
                 gesture = gestures["gesture_name"]
 
                 if gesture.on_trigger != None:
