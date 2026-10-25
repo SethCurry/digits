@@ -36,6 +36,19 @@ By the end you will have:
 - **Python ≥ 3.10** and [`uv`](https://docs.astral.sh/uv/).
 - Roughly 30–60 minutes, most of it spent recording training data.
 
+## On Window Sizing
+
+You need to make sure that you use the same window size (how many frames you feed to the network at once)
+through this entire process, and that you use the same interval between frames as well.
+
+By default, digits uses a 50Hz clock rate and uses a window of 50 frames.
+I.e. it records a frame every 20ms, and the LLM sees the past second
+of frames at once.
+
+You're free to change those, just make sure that you record your training at the same frame rate
+you do inference at, and that your training samples are split into files according to the
+window size.  A window size of 50 means 50 lines per file, 20 would be 20 lines, etc.
+
 ## How the pieces fit together
 
 You don't need to know the internals to follow this guide, but three facts
