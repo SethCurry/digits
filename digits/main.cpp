@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     CLI::App app{"A CLI utility for capturing streams of frames from a Leap Motion device."};
     argv = app.ensure_utf8(argv);
 
-    std::int32_t interval = 50;
+    std::int32_t interval = 20;
     app.add_option("-i,--interval", interval, "The interval between capturing frames, in milliseconds");
 
     std::string format = "model";

@@ -47,8 +47,10 @@ explain most of the rules below:
    50 ms, one window is **2.5 seconds** of hand motion.
 2. **The set of gestures is an enum.** `digipy/src/digipy/gestures.py`
    defines the classes the model can output. The model's output-layer size is
-   a separate, hard-coded class count that must be kept in sync with the enum
-   (see Step 2), so adding a gesture always means retraining from scratch.
+   derived automatically from `len(Gesture)` (see the `N_GESTURES` constant in
+   `digipy/src/digipy/training.py`), so adding a gesture is just an enum
+   change — but it still means retraining from scratch, since the output
+   layer changes size and old weight files no longer match it.
 3. **Training data is a directory tree.** `digipy train` loads *every*
    directory under `training/data/`, so all gestures — old and new — are
    trained together in one run.
@@ -102,29 +104,12 @@ snake_case enum name (`thumbs_up` — capitalization doesn't matter, the
 underscores do) or the integer (`3`); both are accepted everywhere labels
 are used.
 
-**You must also bump the model's class count.** The number of output classes
-is currently hard-coded as `3` in two default arguments in
-`digipy/src/digipy/training.py`. Change both defaults to `len(Gesture)` (or
-to the new literal count) so the model grows with the enum:
-
-```python
-def create_model(
-    n_classes: int = len(Gesture),   # was 3
-    ...
-```
-
-```python
-def load_sample_data(
-    samples_dir: str | Path = "../training/data",
-    training_per_validate: int = 4,
-    n_classes: int = len(Gesture),   # was 3
-)
-```
-
-If you skip this, training will crash with an out-of-bounds/shape error the
-first time it sees your new label, and previously saved weights will no
-longer match the model's output layer (they cannot be reused — retraining
-from scratch is expected and automatic).
+The model's class count is derived from `len(Gesture)` automatically (see the
+`N_GESTURES` constant in `digipy/src/digipy/training.py`, used as the default
+for `create_model()` and `load_sample_data()`), so you do **not** need to
+touch `training.py` — the output layer grows with the enum on its own.
+Previously saved weights will no longer match the resized output layer, so
+retraining from scratch is expected and automatic.
 
 > Do **not** add a new entry for `none` — `Gesture.NONE` (value `0`) already
 > exists. What `none` needs from you is *training data*, not an enum entry.
@@ -328,7 +313,7 @@ Press **Ctrl+C** to quit. Things to try:
 | Symptom | Likely cause and fix |
 | --- | --- |
 | `unknown gesture: ...` when labeling | The label isn't in `gestures.py` yet (add it first), or it isn't the enum name / integer — try `thumbs_up`, not `thumbs up` (underscores and spelling matter; capitalization doesn't). |
-| Training crashes with an index/shape error | The `n_classes` defaults in `training.py` still say `3` — see Step 2. |
+| Training crashes with an index/shape error | A label's integer value is outside the range of the enum, or you're loading old weights into a model whose output layer changed size when you added a gesture. Retrain from scratch after any enum change. |
 | Fewer samples trained than you saved | Windows that aren't exactly 50 frames, or contain a two-hand frame, are silently skipped. Check with `wc -l` and re-record with one hand in view. |
 | `label-hand` saved 20-frame samples | Change the **save count** box to `50` (its default is 20). |
 | New gesture fires on relaxed/random hands | Not enough (or not enough varied) `none` data — record more `none` windows and retrain. |
@@ -339,8 +324,7 @@ Press **Ctrl+C** to quit. Things to try:
 ## Checklist
 
 - [ ] Build everything: `cd digits && ./build.sh`, then `cd ../digipy && uv sync`
-- [ ] Add the gesture to `gestures.py` with the next free integer value
-- [ ] Bump `n_classes` in `create_model` / `load_sample_data` (`training.py`)
+- [ ] Add the gesture to `gestures.py` with the next free integer value (the model class count updates automatically from `len(Gesture)`)
 - [ ] Capture and label ≥ ~20 windows for the new gesture (50 frames each, one hand in view)
 - [ ] Capture and label a **`none`** gesture too — plus every other gesture in the enum
 - [ ] Re-run training: `uv run digipy train -t ../training/data -o ./model.weights.h5`

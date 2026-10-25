@@ -140,11 +140,7 @@ def run(args: argparse.Namespace) -> None:
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
     ax.set_zlabel("Z (mm)")
-    try:
-        ax.set_box_aspect((1, 1, 1))
-    except AttributeError:
-        # Older matplotlib versions don't support set_box_aspect.
-        pass
+    ax.set_box_aspect((1, 1, 1))
 
     status_ax = fig.add_axes([0.05, 0.255, 0.90, 0.03])
     status_ax.axis("off")
@@ -152,13 +148,15 @@ def run(args: argparse.Namespace) -> None:
         0.0, 0.5, "", va="center", ha="left", fontsize=10, family="monospace"
     )
 
-    current = {"i": 0}
-    skeleton_artists = []
+    current_i = 0
+    playing = False
+    skeleton_artists: list = []
 
     def render(i):
+        nonlocal current_i
         # Clamp to valid range.
         i = max(0, min(n - 1, i))
-        current["i"] = i
+        current_i = i
         for art in skeleton_artists:
             try:
                 art.remove()
@@ -218,27 +216,26 @@ def run(args: argparse.Namespace) -> None:
 
     # --- Callbacks --------------------------------------------------------
     def on_prev(_event):
-        render(current["i"] - 1)
+        render(current_i - 1)
 
     def on_next(_event):
-        render(current["i"] + 1)
+        render(current_i + 1)
 
     def on_slider(val):
         render(int(val))
 
-    playing = {"on": False}
-
     def on_play(_event):
-        if playing["on"]:
-            playing["on"] = False
+        nonlocal playing
+        if playing:
+            playing = False
             btn_play.label.set_text("Play")
             return
-        playing["on"] = True
+        playing = True
         btn_play.label.set_text("Pause")
 
         # Blocking-ish playback loop; plt.pause pumps GUI events and sleeps.
-        while playing["on"] and plt.fignum_exists(fig.number):
-            nxt = current["i"] + 1
+        while playing and plt.fignum_exists(fig.number):
+            nxt = current_i + 1
             if nxt >= n:
                 nxt = 0  # loop
             render(nxt)
@@ -251,7 +248,7 @@ def run(args: argparse.Namespace) -> None:
         try:
             out_dir = _export_sample(
                 frames,
-                start=current["i"],
+                start=current_i,
                 count=count_box.text,
                 label=label_box.text,
                 sample_name=name_box.text,

@@ -53,31 +53,30 @@ def collect_segments(hand: dict) -> list[tuple[np.ndarray, np.ndarray]]:
     wrist = np.array(arm["wrist_position"], dtype=float)
     segs.append((elbow, wrist))
 
-    fingers = {f["name"]: f for f in hand["fingers"]}
+    # Look up each finger's bones once, reused for both the palm and bone
+    # segments below.
+    finger_bones: dict[str, dict[str, dict]] = {}
+    for finger in hand["fingers"]:
+        finger_bones[finger["name"]] = {b["name"]: b for b in finger["bones"]}
 
     # Wrist -> each finger's metacarpal base, to suggest the palm.
     for name in FINGER_ORDER:
-        finger = fingers.get(name)
-        if finger is None:
-            continue
-        bones = {b["name"]: b for b in finger["bones"]}
-        meta = bones.get("Metacarpal")
-        if meta is not None:
+        bones = finger_bones.get(name)
+        if bones and (meta := bones.get("Metacarpal")):
             segs.append((wrist, np.array(meta["start"], dtype=float)))
 
     # Finger bones: metacarpal -> proximal -> middle -> distal.
     for name in FINGER_ORDER:
-        finger = fingers.get(name)
-        if finger is None:
+        bones = finger_bones.get(name)
+        if not bones:
             continue
-        bones = {b["name"]: b for b in finger["bones"]}
         for bname in BONE_ORDER:
             b = bones.get(bname)
             if b is None:
                 continue
-            start = np.array(b["start"], dtype=float)
-            end = np.array(b["end"], dtype=float)
-            segs.append((start, end))
+            segs.append(
+                (np.array(b["start"], dtype=float), np.array(b["end"], dtype=float))
+            )
 
     return segs
 

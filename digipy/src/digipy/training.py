@@ -43,17 +43,14 @@ from digipy.gestures import Gesture, parse_gesture
 DURATION = 50
 N_CHANNELS = 66
 
+# Number of gesture classes, derived from the Gesture enum so adding a new
+# gesture automatically flows through to the model and dataset code.
+N_GESTURES = len(Gesture)
 
-def _average(one: float, two: float) -> float:
-    return (one + two) / 2
 
-
-def _average_vectors(one: list[float], two: list[float]) -> list[float]:
-    return [
-        _average(one[0], two[0]),
-        _average(one[1], two[1]),
-        _average(one[2], two[2]),
-    ]
+def _midpoint(one: list[float], two: list[float]) -> list[float]:
+    """Return the midpoint of two 3-D coordinate vectors."""
+    return [(one[0] + two[0]) / 2, (one[1] + two[1]) / 2, (one[2] + two[2]) / 2]
 
 
 class Position(BaseModel):
@@ -61,13 +58,13 @@ class Position(BaseModel):
     y: float
     z: float
 
-    @staticmethod
-    def from_vector(items: list[float]) -> Position:
-        return Position(x=items[0], y=items[1], z=items[2])
+    @classmethod
+    def from_vector(cls, items: list[float]) -> Position:
+        return cls(x=items[0], y=items[1], z=items[2])
 
-    @staticmethod
-    def avg_vectors(one: list[float], two: list[float]) -> Position:
-        return Position.from_vector(_average_vectors(one, two))
+    @classmethod
+    def midpoint(cls, one: list[float], two: list[float]) -> Position:
+        return cls.from_vector(_midpoint(one, two))
 
     def to_list(self) -> list[float]:
         return [self.x, self.y, self.z]
@@ -105,14 +102,14 @@ class SkeletalHGRFrame(BaseModel):
                 bones = {bone.name: bone for bone in finger.bones}
 
                 tip = Position.from_vector(bones["Distal"].end)
-                third_knuckle = Position.avg_vectors(
+                third_knuckle = Position.midpoint(
                     bones["Distal"].start, bones["Middle"].end
                 )
-                second_knuckle = Position.avg_vectors(
+                second_knuckle = Position.midpoint(
                     bones["Middle"].start,
                     bones["Proximal"].end,
                 )
-                first_knuckle = Position.avg_vectors(
+                first_knuckle = Position.midpoint(
                     bones["Proximal"].start,
                     bones["Metacarpal"].end,
                 )
@@ -201,7 +198,7 @@ def load_data_dir(path: str | Path, duration: int = DURATION) -> list[LoadedSamp
 
 
 def create_model(
-    n_classes: int = 3,
+    n_classes: int = N_GESTURES,
     duration: int = DURATION,
     n_channels: int = N_CHANNELS,
     dropout_probability: float = 0.2,
@@ -258,7 +255,7 @@ def create_model(
 def load_sample_data(
     samples_dir: str | Path = "../training/data",
     training_per_validate: int = 4,
-    n_classes: int = 3,
+    n_classes: int = N_GESTURES,
 ) -> TrainingDatasets:
     """Load all sample directories under *samples_dir* and split into
     train / validation datasets.
@@ -303,23 +300,25 @@ def load_sample_data(
 
 def plot_history(history: History) -> None:
     """Plot training & validation accuracy and loss curves."""
-    # Accuracy
-    plt.plot(history.history["accuracy"])
-    plt.plot(history.history["val_accuracy"])
-    plt.title("model accuracy")
-    plt.ylabel("accuracy")
-    plt.xlabel("epoch")
-    plt.legend(["train", "test"], loc="upper left")
-    plt.show()
+    fig, (acc_ax, loss_ax) = plt.subplots(1, 2, figsize=(10, 4))
 
-    # Loss
-    plt.plot(history.history["loss"])
-    plt.plot(history.history["val_loss"])
-    plt.title("model loss")
-    plt.ylabel("loss")
-    plt.xlabel("epoch")
-    plt.legend(["train", "test"], loc="upper left")
+    acc_ax.plot(history.history["accuracy"], label="train")
+    acc_ax.plot(history.history["val_accuracy"], label="val")
+    acc_ax.set_title("model accuracy")
+    acc_ax.set_xlabel("epoch")
+    acc_ax.set_ylabel("accuracy")
+    acc_ax.legend(loc="upper left")
+
+    loss_ax.plot(history.history["loss"], label="train")
+    loss_ax.plot(history.history["val_loss"], label="val")
+    loss_ax.set_title("model loss")
+    loss_ax.set_xlabel("epoch")
+    loss_ax.set_ylabel("loss")
+    loss_ax.legend(loc="upper left")
+
+    fig.tight_layout()
     plt.show()
+    plt.close(fig)
 
 
 class GestureModel:

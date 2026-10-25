@@ -50,6 +50,7 @@ def _run_label_hand(args: argparse.Namespace) -> None:
 
 
 def _train_model(args: argparse.Namespace) -> None:
+    """Train a gesture model from labeled samples and save the weights."""
     model = training.GestureModel()
 
     samples = training.load_sample_data(args.training_data)
@@ -193,7 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-b",
         "--binary",
         default="../src/build/digits",
-        help="Path to the digits binary to launch for frame capture.",
+        help=(
+            "Path to the digits binary (currently informational only; the "
+            "C listener connects to the Leap service directly)."
+        ),
     )
     inference.add_argument(
         "--interval",

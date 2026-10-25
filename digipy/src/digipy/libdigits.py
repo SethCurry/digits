@@ -29,16 +29,23 @@ libdigits = ctypes.CDLL(str(_LIB_PATH))
 # hand back a single numpy ndarray at the end.
 RAW_FRAMES = (ctypes.c_float * (N_FRAMES * N_INPUTS))()
 
+
 # The C side expects ``float **dest``: an array of pointers, one per row, each
 # pointing at a buffer of N_INPUTS floats.  Build that array of row pointers
 # into the contiguous buffer above.
-ROW_PTRS = (ctypes.POINTER(ctypes.c_float) * N_FRAMES)()
-_row_stride = N_INPUTS * ctypes.sizeof(ctypes.c_float)
-for _i in range(N_FRAMES):
-    ROW_PTRS[_i] = ctypes.cast(
-        ctypes.addressof(RAW_FRAMES) + _i * _row_stride,
-        ctypes.POINTER(ctypes.c_float),
-    )
+def _build_row_ptrs(raw_frames: ctypes.Array, n_frames: int, n_inputs: int):
+    ptrs = (ctypes.POINTER(ctypes.c_float) * n_frames)()
+    row_stride = n_inputs * ctypes.sizeof(ctypes.c_float)
+    base = ctypes.addressof(raw_frames)
+    for i in range(n_frames):
+        ptrs[i] = ctypes.cast(
+            base + i * row_stride,
+            ctypes.POINTER(ctypes.c_float),
+        )
+    return ptrs
+
+
+ROW_PTRS = _build_row_ptrs(RAW_FRAMES, N_FRAMES, N_INPUTS)
 
 _FLOAT_PTR_PTR = ctypes.POINTER(ctypes.POINTER(ctypes.c_float))
 
