@@ -20,9 +20,8 @@ N_FRAMES = 50
 N_INPUTS = 66
 
 # Path to the shared library.  Override with the DIGIPY_LIBDIGITS env var.
-_DEFAULT_LIB_PATH = "../src/build/lib/libdigitspy/liblibdigitspy.so"
+_DEFAULT_LIB_PATH = "../digits/build/lib/digitspy/liblibdigitspy.so"
 _LIB_PATH = Path(os.environ.get("DIGIPY_LIBDIGITS", _DEFAULT_LIB_PATH))
-
 libdigits = ctypes.CDLL(str(_LIB_PATH))
 
 # A single contiguous buffer holding all frames back-to-back.  This lets us

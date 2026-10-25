@@ -14,5 +14,6 @@ gestures:
         training_data_dir: "../training/data/none-megalong"
     finger_gun:
         training_data_dir: "../training/data/finger-gun"
+        on_trigger: "firefox https://www.youtube.com/watch?v=E4WlUXrJgy4"
     peace_sign:
         training_data_dir: "../training/data/peace-sign"

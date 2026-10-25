@@ -174,7 +174,13 @@ def load_data_dir(
 
     A sample directory contains an ``answer.txt`` with the gesture label and
     one or more ``*.json`` JSONL files, each a sequence of frames making up
-    one window.  Windows whose frame count != *duration* are skipped.
+    one or more windows.  Files whose frame count exceeds *duration* are
+    transparently split into consecutive, non-overlapping windows of
+    *duration* frames each; any trailing frames shorter than *duration*
+    (including files that are shorter than *duration* to begin with) are
+    discarded.  A capture frame may yield multiple skeletal frames (one per
+    detected hand), so the windowing operates on skeletal frames rather than
+    raw capture frames.
     *gestures* is the list of configured gesture names (class-index order)
     used to parse and validate the label.
     """
@@ -191,10 +197,10 @@ def load_data_dir(
         for frame in raw_frames:
             samples.extend(SkeletalHGRFrame.from_capture(frame))
 
-        if len(samples) != duration:
-            continue
-
-        all_samples.append(LoadedSample(answer=answer, samples=samples))
+        for start in range(0, len(samples) - duration + 1, duration):
+            all_samples.append(
+                LoadedSample(answer=answer, samples=samples[start : start + duration])
+            )
 
     return all_samples
 
@@ -278,8 +284,6 @@ def load_sample_data(
     train_split: list[LoadedSample] = []
     val_split: list[LoadedSample] = []
     for i, sample in enumerate(samples):
-        if len(sample.samples) != DURATION:
-            continue
         if i % training_per_validate == 0:
             val_split.append(sample)
         else:

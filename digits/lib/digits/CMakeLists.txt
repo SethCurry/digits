@@ -1,5 +1,4 @@
 add_library(libdigits SHARED
-    cli.cpp
     listener.cpp
     logging.cpp
 )

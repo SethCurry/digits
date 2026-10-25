@@ -111,8 +111,10 @@ def _train_model(args: argparse.Namespace) -> None:
 
 
 def spawn_command(cmd: str):
+    def inner_command():
+        subprocess.run(cmd, shell=True, check=False)
     threading.Thread(
-        target=subprocess.run, args=(cmd), kwargs={"shell": True}, daemon=True
+        target=inner_command,
     ).start()
 
 
@@ -153,7 +155,7 @@ def _run_inference(args: argparse.Namespace) -> None:
             )
 
             if gesture_name in gestures and gesture_name != last_gesture:
-                gesture = gestures["gesture_name"]
+                gesture = gestures[gesture_name]
 
                 if gesture.on_trigger != None:
                     spawn_command(gesture.on_trigger)
@@ -299,7 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     inference.add_argument(
         "--interval",
         type=int,
-        default=50,
+        default=20,
         help="Frame emit interval (ms) passed to the digits binary.",
     )
     inference.add_argument(
